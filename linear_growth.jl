@@ -10,6 +10,7 @@ begin
 	using StatsPlots
 	using SpecialFunctions
 	using StatsBase
+	using Dates
 end
 
 function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
@@ -160,15 +161,18 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
 
 	p1 = plot(title = "Learning of R")
     for i in 1:P
-        plot!(5:max_iter, [E_R_history[i, t] for t in 5:max_iter], label = "E_R[$i]")
+        plot!(5:max_iter, [E_R_history[i, t] for t in 5:max_iter], label = "R[$i]")
     end
 
     p2 = plot(title = "Learning of Q")
     for i in 1:K
-        plot!(5:max_iter, [E_Q_history[i, i, t] for t in 5:max_iter], label = "E_Q[$i, $i]")
+        plot!(5:max_iter, [E_Q_history[i, i, t] for t in 5:max_iter], label = "Q[$i, $i]")
     end
 	
-	plot(p1, p2, layout = (1, 2))
+	function_name = "R_Q_Progress"
+	p = plot(p1, p2, layout = (1, 2))
+	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 end
 
 function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=200, tol=5e-3)
@@ -226,14 +230,18 @@ function main()
 	K = size(A_lg, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
 
+	vbem_his_plot(y, A_lg, C_lg, prior)
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
 		@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, t)
-		display(plot(elbos, label = "elbo", title = "ElBO Progression Linear Growth"))
+		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 
 		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
 		μs_s, _, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
 		println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		sleep(1)
 	end
 end
 

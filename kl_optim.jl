@@ -13,6 +13,7 @@ Pkg.add("StateSpaceModels")
 Pkg.add("Distributions")
 Pkg.add("MultivariateStats")
 Pkg.add("StatsFuns")
+Pkg.add("Dates")
 using SpecialFunctions
 using LinearAlgebra
 
@@ -40,6 +41,22 @@ function kl_C(μ_0, γ, μ_C, Σ_C, exp_ρs)
 	kl = -0.5*logdet(Σ_C*Diagonal(γ))
 	kl -= 0.5*tr(I - (Σ_C*Diagonal(γ) + (μ_C - μ_0)*(μ_C - μ_0)')*exp_ρs*Diagonal(γ))
 	return kl
+end
+
+
+function error_metrics(true_means, smoothed_means)
+# mean squared error (MSE), mean absolute deviation (MAD)
+    T = 0
+    if length(size(true_means)) == 1
+        T = length(true_means)
+    else
+        T = size(true_means)[2]
+    end
+
+    mse = sum((true_means .- smoothed_means).^2) / T
+    mad = sum(abs.(true_means .- smoothed_means)) / T
+
+    return mse, mad
 end
 
 

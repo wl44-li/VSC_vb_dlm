@@ -11,18 +11,10 @@ begin
 	using SpecialFunctions
 	using PDMats
 	using StatsBase
+	using Dates
 end
 
 # Gibbs sampling analog to VBEM-DLM
-function error_metrics(true_means, smoothed_means)
-    T = size(true_means)[2]
-    mse = sum((true_means .- smoothed_means).^2) / T
-    mad = sum(abs.(true_means .- smoothed_means)) / T
-
-	# mean squared error (MSE), mean absolute deviation (MAD)
-    return mse, mad
-end
-
 function sample_A(Xs, μ_A, Σ_A, Q)
     K, T = size(Xs)
 	A = zeros(K, K)
@@ -465,16 +457,21 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
     end
 
 	p1 = plot(title = "Learning of R")
+
+	# Show progress of diagonal entries
     for i in 1:P
-        plot!(10:max_iter, [E_R_history[i, i, t] for t in 10:max_iter], label = "E_R[$i, $i]")
+        plot!(10:max_iter, [E_R_history[i, i, t] for t in 10:max_iter], label = "R[$i, $i]")
     end
 
     p2 = plot(title = "Learning of Q")
     for i in 1:K
-        plot!(10:max_iter, [E_Q_history[i, i, t] for t in 10:max_iter], label = "E_Q[$i, $i]")
+        plot!(10:max_iter, [E_Q_history[i, i, t] for t in 10:max_iter], label = "Q[$i, $i]")
     end
 	
-	display(plot(p1, p2, layout = (1, 2)))
+	function_name = "R_Q_Progress"
+	p = plot(p1, p2, layout = (1, 2))
+	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 end
 
 # With Convergence Check
@@ -523,11 +520,15 @@ function test_vb()
 	W_Q = Matrix{Float64}(100*I, K, K)
 	W_R = Matrix{Float64}(100*I, D, D)
 	prior = Prior(D + 1.0, W_R, K + 1.0, W_Q, zeros(K), Matrix{Float64}(I, K, K))
+	
 	vbem_his_plot(y, A, C, prior, 100)
 
 	println("--- VB ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
-	display(plot(elbos, label = "elbo", title = "ElBO progression"))
+	p = plot(elbos, label = "elbo", title = "ElBO progression")
+	display(p)
+	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+	savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
     μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
 	println("MSE, MAD of VB: ", error_metrics(x_true, μs_s))
@@ -743,10 +744,15 @@ function main()
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
 		@time R, Q, elbos = vbem_c_diag(y, A, C, prior, t)
-		display(plot(elbos, label = "elbo", title = "ElBO progression"))
+		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
+		#display(p)
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+
 		μs_f, σs_f2 = forward_v(y, A, C, R, Q, prior)
 		μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
 		println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		sleep(1)
 	end
 end
 

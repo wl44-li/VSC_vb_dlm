@@ -94,16 +94,6 @@ function v_forward(y::Vector{Float64}, exp_np::Exp_ϕ_uni, μ_0, σ_0)
 	return μs, σs, σs_
 end
 
-function error_metrics(true_means, smoothed_means)
-    T = length(true_means)
-    mse = sum((true_means .- smoothed_means).^2) / T
-    mad = sum(abs.(true_means .- smoothed_means)) / T
-    mape = sum(abs.((true_means .- smoothed_means) ./ true_means)) / T * 100
-
-	# mean squared error (MSE), mean absolute deviation (MAD), and mean absolute percentage error (MAPE) 
-    return mse, mad, mape
-end
-
 function v_backward(y::Vector{Float64}, exp_np::Exp_ϕ_uni)
 	T = length(y)
 	ηs = zeros(T)
@@ -626,7 +616,7 @@ function main()
 	y, x_true = gen_data(A, C, Q, R, 0.0, 1.0, T)
 
 	model = LocalLevel(y)
-	fit!(model) # MLE and uni-variate kalman filter
+	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
 	print_results(model)
 
 	fm = get_filtered_state(model)
@@ -635,8 +625,8 @@ function main()
 	sm = get_smoothed_state(model)
 	smooth_err = error_metrics(x_true, sm)
 
-	println("\nPackage Filtered MSE, MAD, MAPE: ", filter_err)
-	println("Package Smoother MSE, MAD, MAPE: ", smooth_err)
+	println("\nPackage Filtered MSE, MAD: ", filter_err)
+	println("Package Smoother MSE, MAD: ", smooth_err)
 	
 	hpp_ll = Priors_ll(0.01, 0.01, 0.01, 0.01, 0.0, 1.0)
 
@@ -646,7 +636,7 @@ function main()
 
 		μs_f, σs_f2 = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
     	μs_s, _, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
-		println("\n VB latent x error: " , error_metrics(x_true, μs_s))
+		println("\n VB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
 	end
 end
 
