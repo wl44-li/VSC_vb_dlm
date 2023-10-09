@@ -753,6 +753,11 @@ function main()
 		μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
 		println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
 		sleep(1)
+
+		# report standard errors around mean (10 random seeds)
+		# T-test if available 
+		# real-world dataset (Nile river, temperature data)
+		# when ELBO is useful, local level, linear growth, seasonal (at least 10 repeats)
 	end
 end
 
