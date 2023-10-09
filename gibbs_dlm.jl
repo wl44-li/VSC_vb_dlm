@@ -56,7 +56,7 @@ function sample_R(Xs, Ys, C, α_ρ, β_ρ)
 end
 
 function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
-	p, T = size(Ys)
+	_, T = size(Ys)
     d, _ = size(A)
 	
     # Initialize
@@ -232,7 +232,7 @@ function sample_Q_(x, A, v_1, S_1, x_0)
     return inv(Q⁻¹)
 end
 
-function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=100, thinning=1)
+function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1)
 	P, T = size(y)
 	K = size(A, 2)
 	
@@ -475,7 +475,7 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
 end
 
 # With Convergence Check
-function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=200, tol=5e-3)
+function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=500, tol=5e-3)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	E_R, E_Q  = missing, missing
 	elbo_prev = -Inf
@@ -504,53 +504,6 @@ function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}
 
 	return E_R, E_Q, el_s
 end
-
-function test_vb()
-	A = [1.0 0.0; 0.0 1.0]
-	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
-	T = 500
-	Random.seed!(133)
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
-	D, _ = size(y)
-	K = size(A, 1)
-	W_Q = Matrix{Float64}(100*I, K, K)
-	W_R = Matrix{Float64}(100*I, D, D)
-	prior = Prior(D + 1.0, W_R, K + 1.0, W_Q, zeros(K), Matrix{Float64}(I, K, K))
-	
-	vbem_his_plot(y, A, C, prior, 100)
-
-	println("--- VB ---")
-	@time R, Q, elbos = vbem_c(y, A, C, prior)
-	p = plot(elbos, label = "elbo", title = "ElBO progression")
-	display(p)
-	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-	savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
-    μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
-	println("MSE, MAD of VB: ", error_metrics(x_true, μs_s))
-
-	println("--- MCMC ---")
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, 3000, 1000, 1)
-	Q_chain = Chains(reshape(Qs_samples, 3000, 4))
-	R_chain = Chains(reshape(Rs_samples, 3000, 4))
-
-	summary_stats_q = summarystats(Q_chain)
-	summary_stats_r = summarystats(R_chain)
-	summary_df_q = DataFrame(summary_stats_q)
-	summary_df_r = DataFrame(summary_stats_r)
-	println("Q summary stats: ", summary_df_q)
-	println("R summary stats: ", summary_df_r)
-
-	xs_m = mean(Xs_samples, dims=1)[1, :, :]
-	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
-	println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
-end
-
-test_vb()
 
 # Restrict R, Q as diagonal matrices
 function vb_m_diag(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
@@ -726,7 +679,7 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 	return inv(E_R_inv), inv(E_Q_inv), el_s
 end
 
-function main()
+function test_vb_diag_plot()
 	# A, C identity matrix (cf. local level model)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
@@ -758,6 +711,59 @@ function main()
 		# T-test if available 
 		# real-world dataset (Nile river, temperature data)
 		# when ELBO is useful, local level, linear growth, seasonal (at least 10 repeats)
+	end
+end
+
+function test_comp(rnd)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = Diagonal([0.1, 0.1])
+	T = 500
+	Random.seed!(rnd)
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	D, _ = size(y)
+	K = size(A, 1)
+	W_Q = Matrix{Float64}(100*I, K, K)
+	W_R = Matrix{Float64}(100*I, D, D)
+	prior = Prior(D + 1.0, W_R, K + 1.0, W_Q, zeros(K), Matrix{Float64}(I, K, K))
+	
+	println("--- VB ---")
+	@time R, Q, elbos = vbem_c(y, A, C, prior)
+	p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
+	display(p)
+	#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+	#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
+    μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
+	println("MSE, MAD of VB: ", error_metrics(x_true, μs_s))
+
+	println("\n--- MCMC ---")
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, 3000, 1500, 1)
+	Q_chain = Chains(reshape(Qs_samples, 3000, 4))
+	R_chain = Chains(reshape(Rs_samples, 3000, 4))
+
+	summary_stats_q = summarystats(Q_chain)
+	summary_stats_r = summarystats(R_chain)
+	summary_df_q = DataFrame(summary_stats_q)
+	summary_df_r = DataFrame(summary_stats_r)
+	println("Q summary stats: ", summary_df_q)
+	println()
+	println("R summary stats: ", summary_df_r)
+
+	xs_m = mean(Xs_samples, dims=1)[1, :, :]
+	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+	println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+end
+
+function main()
+	seeds = [103, 133, 100, 143, 111]
+	for sd in seeds
+		println("\n----- BEGIN Run seed: $sd -----")
+		test_comp(sd)
+		println("----- END Run seed: $sd -----\n")
 	end
 end
 

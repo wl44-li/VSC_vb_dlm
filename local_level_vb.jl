@@ -341,7 +341,7 @@ function sample_q(xs, a, α_q, β_q, x_0)
 	return 1/λ_q # inverse precision is variance
 end
 
-function gibbs_ll(y, a, c, mcmc=3000, burn_in=300, thinning=1)
+function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
 	T = length(y)
 	μ_0 = 0.0  # Prior mean for the states
 	λ_0 = 1.0  # Prior precision for the states
@@ -380,6 +380,33 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=300, thinning=1)
 	end
 
 	return samples_x, samples_q, samples_r
+end
+
+function test_gibbs_ll(rnd)
+	Random.seed!(rnd)
+	T = 500
+	A = 1.0
+	C = 1.0
+	R = 0.2
+	Q = 1.0 
+	y, x_true = gen_data(A, C, Q, R, 0.0, 1.0, T)
+	println("--- MCMC ---")
+
+	@time s_x, s_q, s_r = gibbs_ll(y, A, C)
+
+	Q_chain = Chains(reshape(s_q, 3000, 1))
+	R_chain = Chains(reshape(s_r, 3000, 1))
+
+	summary_stats_q = summarystats(Q_chain)
+	summary_stats_r = summarystats(R_chain)
+	summary_df_q = DataFrame(summary_stats_q)
+	summary_df_r = DataFrame(summary_stats_r)
+	println("Q summary stats: ", summary_df_q)
+	println("R summary stats: ", summary_df_r)
+
+	x_m = mean(s_x, dims=1)[1,:]
+	println("\nend chain x sample error ", error_metrics(x_true, s_x[end,: ]))
+	println("average x sample error " , error_metrics(x_true, x_m))
 end
 
 begin
@@ -606,8 +633,8 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	return 1/E_τ_r, 1/E_τ_q, el_s
 end
 
-function main()
-	Random.seed!(123)
+function test_vb_ll(rnd)
+	Random.seed!(rnd)
 	T = 500
 	A = 1.0
 	C = 1.0
@@ -630,6 +657,7 @@ function main()
 	
 	hpp_ll = Priors_ll(0.01, 0.01, 0.01, 0.01, 0.0, 1.0)
 
+	println("\n--- VBEM ---")
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
 		@time r, q = vb_ll_c(y, hpp_ll, t)
@@ -637,6 +665,19 @@ function main()
 		μs_f, σs_f2 = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
     	μs_s, _, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
 		println("\n VB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+	end
+end
+
+#test_vb_ll()
+
+function main()
+	seeds = [103, 133, 100, 143, 111]
+	for sd in seeds
+		println("\n----- BEGIN Run seed: $sd -----")
+		test_gibbs_ll(sd)
+		println()
+		test_vb_ll(sd)
+		println("----- END Run seed: $sd -----\n")
 	end
 end
 
