@@ -5,6 +5,8 @@ begin
 	using LinearAlgebra
 	using SpecialFunctions
 	using StateSpaceModels
+	using MCMCChains
+	using DataFrames
 end
 
 begin
@@ -602,20 +604,11 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	el_s = zeros(max_iter)
 	for i in 1:max_iter
 		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)
-				
 		hss, μs_0, σs_s0, log_z = vb_e_ll(y, E_τ_r, E_τ_q, hpp)
 
 		kl_ga = kl_gamma(hpp.α_r, hpp.β_r, qθ.α_r_p, qθ.β_r_p) + kl_gamma(hpp.α_q, hpp.β_q, qθ.α_q_p, qθ.β_q_p)
-		
 		elbo = log_z - kl_ga
 		el_s[i] = elbo
-
-		if (hp_learn)
-			if (i%5 == 0) 
-				a_r, b_r, a_q, b_q = update_ab(hpp, qθ)
-				hpp = Priors_ll(a_r, b_r, a_q, b_q, μs_0, σs_s0)
-			end
-		end
 		
 		if abs(elbo - elbo_prev) < tol
 			println("Stopped at iteration: $i")
@@ -623,6 +616,13 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
             break
 		end
 		
+		if (hp_learn)
+			if (i%5 == 0) 
+				a_r, b_r, a_q, b_q = update_ab(hpp, qθ)
+				hpp = Priors_ll(a_r, b_r, a_q, b_q, μs_0, σs_s0)
+			end
+		end
+
         elbo_prev = elbo
 
 		if (i == max_iter)
@@ -671,9 +671,11 @@ end
 #test_vb_ll()
 
 function main()
+	println("Running experiments for local level model:\n")
+
 	seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
-		println("\n----- BEGIN Run seed: $sd -----")
+		println("\n----- BEGIN Run seed: $sd -----\n")
 		test_gibbs_ll(sd)
 		println()
 		test_vb_ll(sd)
@@ -681,7 +683,24 @@ function main()
 	end
 end
 
-main()
+#main()
+
+function out_txt()
+	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
+
+	# Open a file for writing
+	open(file_name, "w") do f
+		# Redirect standard output and standard error to the file
+		redirect_stdout(f) do
+			redirect_stderr(f) do
+				# Your script code here
+				main()
+			end
+		end
+	end
+end
+
+out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

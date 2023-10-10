@@ -12,6 +12,7 @@ begin
 	using PDMats
 	using StatsBase
 	using Dates
+	using DataFrames
 end
 
 # Gibbs sampling analog to VBEM-DLM
@@ -475,7 +476,7 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
 end
 
 # With Convergence Check
-function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=500, tol=5e-3)
+function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=500, tol=5e-4)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	E_R, E_Q  = missing, missing
 	elbo_prev = -Inf
@@ -636,7 +637,7 @@ function vb_e_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prio
 end
 
 # VBEM with Convergence
-function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=200, tol=5e-3)
+function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=500, tol=5e-4)
 
 	D, _ = size(y)
 	K = size(A, 1)
@@ -655,6 +656,12 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 		
 		elbo = log_Z - kl_ρ - kl_𝛐
 		el_s[i] = elbo
+
+		if abs(elbo - elbo_prev) < tol
+			println("Stopped at iteration: $i")
+			el_s = el_s[1:i]
+            break
+		end
 		
 		if (hp_learn)
 			if (i%5 == 0) 
@@ -662,13 +669,7 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 				prior = HPP_D(α_, β_, a_, b_, μ_s0, Σ_s0)
 			end
 		end
-		
-		if abs(elbo - elbo_prev) < tol
-			println("Stopped at iteration: $i")
-			el_s = el_s[1:i]
-            break
-		end
-		
+
         elbo_prev = elbo
 
 		if (i == max_iter)
@@ -732,13 +733,18 @@ function test_comp(rnd)
 	
 	println("--- VB ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
-	p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
-	display(p)
+	println("R:")
+	show(stdout, "text/plain", R)
+	println()
+	println("Q:")
+	show(stdout, "text/plain", Q)
+	#p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
+	#display(p)
 	#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 	#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
     μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
-	println("MSE, MAD of VB: ", error_metrics(x_true, μs_s))
+	println("\nMSE, MAD of VB: ", error_metrics(x_true, μs_s))
 
 	println("\n--- MCMC ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, 3000, 1500, 1)
@@ -759,16 +765,33 @@ function test_comp(rnd)
 end
 
 function main()
+	println("Running experiments for full co-variance R, Q:\n")
 	seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
-		println("\n----- BEGIN Run seed: $sd -----")
+		println("\n----- BEGIN Run seed: $sd -----\n")
 		test_comp(sd)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-main()
+#main()
 
+function out_txt()
+	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
+
+	# Open a file for writing
+	open(file_name, "w") do f
+		# Redirect standard output and standard error to the file
+		redirect_stdout(f) do
+			redirect_stderr(f) do
+				# Your script code here
+				main()
+			end
+		end
+	end
+end
+
+out_txt()
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
 # DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
