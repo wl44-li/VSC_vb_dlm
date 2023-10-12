@@ -95,16 +95,13 @@ function vb_m(ys, hps::HPP, ss::HSS_PPCA)
 end
 
 function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
-    D, T = size(ys)
+    _, T = size(ys)
     K = length(hpp.γ)
 
     μs = zeros(K, T)
     Σs = zeros(K, K, T)
 	Σs_ = zeros(K, K, T)
 	
-	Qs = zeros(D, D, T)
-	fs = zeros(D, T)
-
 	# Extract μ_0 and Σ_0 from the HPP struct
     μ_0 = hpp.μ_0
     Σ_0 = hpp.Σ_0
@@ -151,7 +148,6 @@ end
 
 function vb_e(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
     _, T = size(ys)
-	K = length(hpp.γ)
 	# forward pass α_t(x_t)
 	ωs, Υs, Σs_ = v_forward(ys, exp_np, hpp)
 	

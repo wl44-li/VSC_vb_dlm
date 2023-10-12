@@ -317,7 +317,7 @@ function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float6
 end
 
 function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior::Prior)
-    P, T = size(y)
+    _, T = size(y)
     K = size(A, 1)
     
     # Unpack the prior parameters
@@ -411,7 +411,6 @@ function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64,
     #S_C = y * μ_s'
 	S_C = μ_s * y'
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
-    W_Y = y * y'
 
 	# Return the hidden state sufficient statistics
     return HSS(W_C, W_A, S_C, S_A), log_Z
@@ -476,7 +475,7 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
 end
 
 # With Convergence Check
-function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=500, tol=5e-4)
+function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=5e-3)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	E_R, E_Q  = missing, missing
 	elbo_prev = -Inf
@@ -630,14 +629,13 @@ function vb_e_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prio
     S_C = μ_s * y'
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
 	S_A += μ_s0*μ_s[:, 1]'
-    W_Y = y * y'
 
 	# Return the hidden state sufficient statistics
     return HSS(W_C, W_A, S_C, S_A), μ_s0, Σ_s0, log_Z
 end
 
 # VBEM with Convergence
-function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=500, tol=5e-4)
+function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=500, tol=1e-3)
 
 	D, _ = size(y)
 	K = size(A, 1)
@@ -715,11 +713,11 @@ function test_vb_diag_plot()
 	end
 end
 
-function test_comp(rnd)
+function test_comp(rnd, mcmc=20000, burn_in=5000, thin=1)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
+	Q = Diagonal([10.0, 10.0])
+	R = Diagonal([0.5, 0.33])
 	T = 500
 	Random.seed!(rnd)
 	μ_0 = [0.0, 0.0]
@@ -738,8 +736,8 @@ function test_comp(rnd)
 	println()
 	println("Q:")
 	show(stdout, "text/plain", Q)
-	#p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
-	#display(p)
+	p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
+	display(p)
 	#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 	#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
@@ -747,9 +745,11 @@ function test_comp(rnd)
 	println("\nMSE, MAD of VB: ", error_metrics(x_true, μs_s))
 
 	println("\n--- MCMC ---")
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, 3000, 1500, 1)
-	Q_chain = Chains(reshape(Qs_samples, 3000, 4))
-	R_chain = Chains(reshape(Rs_samples, 3000, 4))
+	n_samples = Int.(mcmc/thin)
+	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
+	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
+	R_chain = Chains(reshape(Rs_samples, n_samples, D^2))
 
 	summary_stats_q = summarystats(Q_chain)
 	summary_stats_r = summarystats(R_chain)
@@ -774,17 +774,12 @@ function main()
 	end
 end
 
-#main()
-
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
-	# Open a file for writing
 	open(file_name, "w") do f
-		# Redirect standard output and standard error to the file
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				# Your script code here
 				main()
 			end
 		end

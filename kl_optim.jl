@@ -163,7 +163,12 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
         y = zeros(D, T)
 
         x[:, 1] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
-        y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
+
+        if D == 1
+            y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), sqrt.(R)))
+        else
+            y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
+        end
 
         for t in 2:T
             if (tr(Q) != 0)
@@ -180,5 +185,24 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
         end
 
 	    return y, x
+    end
+end
+
+function plot_latent(x_true, x_inf, max_T = 50)
+# assume both are T x k
+    T, K = size(x_true)
+
+    if T < max_T
+        max_T = T
+    end
+
+    for i in 1:K
+        p = plot()
+        plot!(p, x_true[T-max_T+1:T, i], label="x_true_$i")
+        plot!(p, x_inf[T-max_T+1:T, i], label="x_inf_$i")
+        display(p)
+        plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+        sleep(1)
     end
 end

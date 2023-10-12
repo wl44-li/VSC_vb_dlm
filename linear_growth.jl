@@ -115,7 +115,6 @@ function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64,
     W_A = sum(Σ_s[:, :, 1:end-1], dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 1:end-1]'
     S_C = μ_s * y'
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
-    W_Y = y * y'
 
 	# Return the hidden state sufficient statistics
     return HSS(W_C, W_A, S_C, S_A), μ_s0, Σ_s0, log_Z
@@ -126,7 +125,7 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
 	E_R_inv, E_Q_inv = missing, missing
 
-	for i in 1:max_iter
+	for _ in 1:max_iter
 		E_R_inv, E_Q_inv, _ = vb_m_step(y, hss, prior, A, C)
 				
 		hss, _ = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
@@ -419,7 +418,7 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(rnd)
+function test_gibbs(rnd, mcmc=10000, burn_in=5000, thin=1)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q_lg = Diagonal([0.05, 0.03])
@@ -432,11 +431,12 @@ function test_gibbs(rnd)
 	K = size(A_lg, 1)
 
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, )
-
-	Q_chain = Chains(reshape(Qs_samples, 3000, 4))
-	R_chain = Chains(reshape(Rs_samples, 3000, 1))
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin)
+	println("--- n_samples: $n_samples, burn-in: $burn_in, thining: $thin ---")
+	Q_chain = Chains(reshape(Qs_samples, n_samples, 4))
+	R_chain = Chains(reshape(Rs_samples, n_samples, 1))
 
 	summary_stats_q = summarystats(Q_chain)
 	summary_stats_r = summarystats(R_chain)
@@ -457,23 +457,18 @@ function main()
 	seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs(sd)
+		test_gibbs(sd, 10000, 5000, 1)
 		test_vb(sd)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-#main()
-
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
-	# Open a file for writing
 	open(file_name, "w") do f
-		# Redirect standard output and standard error to the file
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				# Your script code here
 				main()
 			end
 		end
