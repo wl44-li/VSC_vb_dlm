@@ -421,7 +421,7 @@ end
 function test_gibbs(rnd, mcmc=10000, burn_in=5000, thin=1)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.05, 0.03])
+	Q_lg = Diagonal([0.6, 0.3])
 	R_lg = [0.1]
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
@@ -453,11 +453,11 @@ end
 function main()
 	println("Running experiments for linear growth model:\n")
 
-	#seeds = [103, 133, 100, 143, 111]
-	seeds = [88, 145, 105, 104, 134]
+	seeds = [103, 133, 100, 143, 111]
+	#seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs(sd, 10000, 5000, 1)
+		test_gibbs(sd, 20000, 5000, 2)
 		test_vb(sd)
 		println("----- END Run seed: $sd -----\n")
 	end

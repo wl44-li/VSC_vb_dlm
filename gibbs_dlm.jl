@@ -713,11 +713,11 @@ function test_vb_diag_plot()
 	end
 end
 
-function test_comp(rnd, mcmc=20000, burn_in=5000, thin=1)
+function test_comp(rnd, mcmc=40000, burn_in=5000, thin=4)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([10.0, 10.0])
-	R = Diagonal([0.5, 0.33])
+	Q = Diagonal([2.0, 1.0])
+	R = Diagonal([0.1, 0.3])
 	T = 500
 	Random.seed!(rnd)
 	μ_0 = [0.0, 0.0]
@@ -767,6 +767,7 @@ end
 function main()
 	println("Running experiments for full co-variance R, Q:\n")
 	seeds = [103, 133, 100, 143, 111]
+	#seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		test_comp(sd)
