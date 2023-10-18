@@ -15,47 +15,6 @@ begin
 	using DataFrames
 end
 
-# Gibbs sampling analog to VBEM-DLM
-function sample_A(Xs, μ_A, Σ_A, Q)
-    K, T = size(Xs)
-	A = zeros(K, K)
-	Σ_A_inv = inv(Σ_A)
-	for i in 1:K
-     	Σ_post = inv(Σ_A_inv + (Xs[:, 1:T-1] * Xs[:, 1:T-1]') ./ Q[i, i])
-        μ_post = Σ_post * (Σ_A_inv * μ_A + (Xs[:, 1:T-1] * Xs[i, 2:T]) ./ Q[i, i])
-		A[i, :] = rand(MvNormal(μ_post, Symmetric(Σ_post)))
-    end
-    return A
-end
-
-function sample_C(Xs, Ys, μ_C, Σ_C, R)
-    P, T = size(Ys)
-	K, _ = size(Xs)
-    C_sampled = zeros(P, K)
-	
-    for i in 1:P
-        Y = Ys[i, :]
-        Σ_C_inv = inv(Σ_C)
-        Σ_post = inv(Σ_C_inv + (Xs * Xs') ./ R[i, i])
-        μ_post = Σ_post * (Σ_C_inv * μ_C + Xs * Y / R[i, i])
-        C_sampled[i, :] = rand(MvNormal(μ_post, Symmetric(Σ_post)))
-    end
-    return C_sampled
-end
-
-function sample_R(Xs, Ys, C, α_ρ, β_ρ)
-    P, T = size(Ys)
-    ρ_sampled = zeros(P)
-    for i in 1:P
-        Y = Ys[i, :]
-        α_post = α_ρ + T / 2
-        β_post = β_ρ + 0.5 * sum((Y' - C[i, :]' * Xs).^2)
-		
-        ρ_sampled[i] = rand(Gamma(α_post, 1 / β_post))
-    end
-    return diagm(1 ./ ρ_sampled)
-end
-
 function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
 	_, T = size(Ys)
     d, _ = size(A)
@@ -111,96 +70,6 @@ function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
 	x_0 = rand((MvNormal(h_0, Symmetric(H_0))))
 
 	return X, x_0
-end
-
-# Compare with Single-move
-function sample_x_i(y_i, x_i_minus_1, x_i_plus_1, A, C, Q, R)
-    Σ_x_i_inv = C' * inv(R) * C + inv(Q) + A' * inv(Q) * A
-	Σ_x_i = inv(Σ_x_i_inv)
-    μ_x_i = Σ_x_i * (C' * inv(R) * y_i + inv(Q) * A * x_i_minus_1 + A' * inv(Q) * x_i_plus_1)
-	
-    return rand(MvNormal(μ_x_i, Symmetric(Σ_x_i)))
-end
-
-function sample_x_1(y_1, x_2, A, C, Q, R)
-    Σ_x_1_inv = C' * inv(R) * C + A' * inv(Q) * A
-	Σ_x_1 = inv(Σ_x_1_inv)
-    μ_x_1 = Σ_x_1 * (C' * inv(R) * y_1 + A' * inv(Q) * x_2)
-    return rand(MvNormal(μ_x_1, Symmetric(Σ_x_1)))
-end
-
-function sample_x_T(y_T, x_T_1, A, C, Q, R)
-    Σ_x_T_inv = C' * inv(R) * C + inv(Q)
-	Σ_x_T = inv(Σ_x_T_inv)
-    μ_x_T = Σ_x_T * (C' * inv(R) * y_T + inv(Q) * A * x_T_1)
-    return rand(MvNormal(μ_x_T, Symmetric(Σ_x_T)))
-end
-
-function single_move_sampler(Ys, A, C, Q, R, mcmc=2000)
-    p, T = size(Ys)
-    d, _ = size(A)
-	xs = rand(d, T)
-    # Sample each latent state one at a time
-
-	xss = zeros(d, T, mcmc)
-	xss[:, :, 1] = xs
-	
-    for m in 2:mcmc
-		xs[:, 1] = sample_x_1(Ys[:, 1], xs[:, 2], A, C, Q, R)
-
-		for i in 2:T-2
-			xs[:, i] = sample_x_i(Ys[:, i], xs[:, i-1], xs[:, i+1], A, C, Q, R)
-		end
-		xs[:, T] = sample_x_T(Ys[:, T], xs[:, T-1], A, C, Q, R)
-		xss[:, :, m] = xs
-    end
-	
-    return xss
-end
-
-function gibbs_dlm(y, K, single_move=false, Q=Matrix{Float64}(I, K, K), mcmc=3000, burn_in=1500, thinning=1)
-	P, T = size(y)
-	n_samples = Int.(mcmc/thinning)
-    A_samples = zeros(K, K, n_samples)
-    C_samples = zeros(P, K, n_samples)
-    R_samples = zeros(P, P, n_samples)
-    Xs_samples = zeros(K, T, n_samples)
-	
-    # Initialize A, C, and R, using fixed prior 
-    A_init = rand(MvNormal(zeros(K), Matrix{Float64}(I, K, K)), K)'
-    C_init = rand(MvNormal(zeros(K), Matrix{Float64}(I, K, K)), P)'
-	a = 0.1
-	b = 0.1
-	ρ = rand(Gamma(a, b), 2)
-    R_init = Diagonal(1 ./ ρ)
-    A = A_init
-    C = C_init
-    R = R_init
-	μ₀, Σ₀ = vec(mean(y, dims=2)), Matrix{Float64}(I, K, K)
-	
-    for iter in 1:(mcmc + burn_in)
-		Xs = missing
-        # Sample latent states Xs
-		if single_move # not working well in Gibbs
-			Xs = single_move_sampler(y, A, C, Q, R, 1)[:, :, 1]
-		else
-        	Xs, _ = ffbs_x(y, A, C, R, Q, μ₀, Σ₀)
-		end
-		
-        # Sample model parameters A, C, and R
-        A = sample_A(Xs, zeros(K), Σ₀, Q)
-        C = sample_C(Xs, y, zeros(P), Σ₀, R)
-        R = sample_R(Xs, y, C, a, b)
-        # Store samples after burn-in
-        if iter > burn_in && mod(iter - burn_in, thinning) == 0
-			index = div(iter - burn_in, thinning)
-            A_samples[:, :, index] = A
-            C_samples[:, :, index] = C
-            R_samples[:, :, index] = R
-            Xs_samples[:, :, index] = Xs
-        end
-    end
-    return A_samples, C_samples, R_samples, Xs_samples
 end
 
 # Multi-variate DLM with unknown $R, Q$
@@ -678,14 +547,150 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 	return inv(E_R_inv), inv(E_Q_inv), el_s
 end
 
-function test_vb_diag_plot()
-	# A, C identity matrix (cf. local level model)
+# Gibbs sampling of diagonal co-variances
+function sample_R(Xs, Ys, C, a_ρ, b_ρ)
+    P, T = size(Ys)
+    ρ_sampled = zeros(P)
+    for i in 1:P
+        Y = Ys[i, :]
+        a_post = a_ρ + T / 2
+        b_post = b_ρ + 0.5 * sum((Y' - C[i, :]' * Xs).^2)
+		
+        ρ_sampled[i] = rand(Gamma(a_post, 1 / b_post))
+    end
+    return diagm(1 ./ ρ_sampled)
+end
+
+function sample_Q(Xs, A, α_q, β_q)
+    K, T = size(Xs)
+    q_sampled = zeros(K)
+    for i in 1:K
+        X_diff = Xs[i, 2:end] - (A * Xs[:, 1:end-1])[i, :]
+        α_post = α_q + T / 2 - 1  # Subtracting 1 as the first state doesn't have a predecessor
+        β_post = β_q + 0.5 * sum(X_diff.^2)
+        
+        q_sampled[i] = rand(Gamma(α_post, 1 / β_post))
+    end
+    return diagm(1 ./ q_sampled)
+end
+
+function test_Gibbs_RQ()
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = Diagonal([0.1, 0.1])
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(123)
+	T = 1000
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	prior = Q_Gamma(0.01, 0.01, 0.01, 0.01)
+
+	R = sample_R(x_true, y, C, prior.a, prior.b)
+	Q = sample_Q(x_true, A, prior.α, prior.β)
+
+	println("R:")
+	show(stdout, "text/plain", R)
+	println()
+	println("Q:")
+	show(stdout, "text/plain", Q)
+end
+
+function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
+	P, T = size(y)
+	K = size(A, 2)
+	
+	μ_0 = prior.μ_0
+	λ_0 = prior.Σ_0
+	
+	a, b, α, β = prior.a, prior.b, prior.α, prior.β
+	ρ_r = rand(Gamma(a, b), P)
+    R = Diagonal(1 ./ ρ_r)
+	ρ_q = rand(Gamma(α, β), K)
+    Q = Diagonal(1 ./ ρ_q)
+
+	n_samples = Int.(mcmc/thinning)
+	# Store the samples
+	samples_X = zeros(n_samples, K, T)
+	samples_Q = zeros(n_samples, K, K)
+	samples_R = zeros(n_samples, P, P)
+	
+	# Gibbs sampler
+	for i in 1:mcmc+burn_in
+	    # Update the states
+		x, _ = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
+		
+		# Update the system noise
+		Q = sample_Q(x, A, α, β)
+		
+	    # Update the observation noise
+		R = sample_R(x, y, C, a, b)
+	
+	    # Store the samples
+		if i > burn_in && mod(i - burn_in, thinning) == 0
+			index = div(i - burn_in, thinning)
+		    samples_X[index, :, :] = x
+			samples_Q[index, :, :] = Q
+		    samples_R[index, :, :] = R
+		end
+	end
+
+	return samples_X, samples_Q, samples_R
+end
+
+function test_gibbs_diag(rnd, mcmc=10000, burn_in=5000, thin=1)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = Diagonal([0.1, 0.1])
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(rnd)
+	T = 1000
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	K = size(A, 1)
+	D, _ = size(y)
+	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	n_samples = Int.(mcmc/thin)
+	println("--- MCMC ---")
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_diag(y, A, C, prior, mcmc, burn_in, thin)
+	println("--- n_samples: $n_samples, burn-in: $burn_in, thining: $thin ---")
+	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
+	R_chain = Chains(reshape(Rs_samples, n_samples, D^2))
+
+	summary_stats_q = summarystats(Q_chain)
+	summary_stats_r = summarystats(R_chain)
+	summary_df_q = DataFrame(summary_stats_q)
+	summary_df_r = DataFrame(summary_stats_r)
+
+	summary_df_q = summary_df_q[[1,4], :]
+	summary_df_r = summary_df_r[[1,4], :]
+	println("Q summary stats: ", summary_df_q)
+	println()
+	println("R summary stats: ", summary_df_r)
+
+	xs_m = mean(Xs_samples, dims=1)[1, :, :]
+	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+end
+
+#test_gibbs_diag(133)
+
+function test_vb(rnd)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	Q = Diagonal([1.0, 1.0])
 	R = Diagonal([0.1, 0.1])
 	T = 500
-	Random.seed!(1)
+
+	println("Ground-truth R:")
+	show(stdout, "text/plain", R)
+	println()
+	println("Ground-truth Q:")
+	show(stdout, "text/plain", Q)
+	println()
+
+	Random.seed!(rnd)
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
 	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
@@ -696,54 +701,53 @@ function test_vb_diag_plot()
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
 		@time R, Q, elbos = vbem_c_diag(y, A, C, prior, t)
-		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
+		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
 		#display(p)
-		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		println("R:")
+		show(stdout, "text/plain", R)
+		println()
+		println("Q:")
+		show(stdout, "text/plain", Q)
 		μs_f, σs_f2 = forward_v(y, A, C, R, Q, prior)
 		μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
-		println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		println("\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
 		sleep(1)
-
-		# report standard errors around mean (10 random seeds)
-		# T-test if available 
-		# real-world dataset (Nile river, temperature data)
-		# when ELBO is useful, local level, linear growth, seasonal (at least 10 repeats)
 	end
-end
 
-function test_comp(rnd, mcmc=40000, burn_in=5000, thin=4)
-	A = [1.0 0.0; 0.0 1.0]
-	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([2.0, 1.0])
-	R = Diagonal([0.1, 0.3])
-	T = 500
-	Random.seed!(rnd)
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	D, _ = size(y)
-	K = size(A, 1)
-	W_Q = Matrix{Float64}(100*I, K, K)
-	W_R = Matrix{Float64}(100*I, D, D)
+	W_Q = Matrix{Float64}(I, K, K)
+	W_R = Matrix{Float64}(I, D, D)
 	prior = Prior(D + 1.0, W_R, K + 1.0, W_Q, zeros(K), Matrix{Float64}(I, K, K))
-	
-	println("--- VB ---")
+	println("\n--- VB with Full Co-variances ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
 	println("R:")
 	show(stdout, "text/plain", R)
 	println()
 	println("Q:")
 	show(stdout, "text/plain", Q)
-	p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
-	display(p)
+	println()
+	#p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
+	#display(p)
 	#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 	#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
     μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
-	println("\nMSE, MAD of VB: ", error_metrics(x_true, μs_s))
+	println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+end
 
+function test_gibbs_cov(rnd, mcmc=10000, burn_in=5000, thin=1)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = Diagonal([0.1, 0.1])
+	T = 500
+	Random.seed!(rnd)
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	D, _ = size(y)
+	K = size(A, 1)
+	
 	println("\n--- MCMC ---")
 	n_samples = Int.(mcmc/thin)
 	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
@@ -761,16 +765,16 @@ function test_comp(rnd, mcmc=40000, burn_in=5000, thin=4)
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
 	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
-	println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
 end
 
 function main()
 	println("Running experiments for full co-variance R, Q:\n")
-	seeds = [103, 133, 100, 143, 111]
+	seeds = [88, 145, 105, 104, 134, 103, 133, 100, 143, 111]
 	#seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_comp(sd)
+		test_vb(sd)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
@@ -788,6 +792,7 @@ function out_txt()
 end
 
 out_txt()
+
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
 # DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
