@@ -384,26 +384,28 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(rnd)
+function test_gibbs_ll(rnd, mcmc=10000, burn_in=5000, thin=1)
 	Random.seed!(rnd)
 	T = 500
 	A = 1.0
 	C = 1.0
-	R = 0.2
-	Q = 1.0 
+	R = 0.1
+	Q = 0.5
 	y, x_true = gen_data(A, C, Q, R, 0.0, 1.0, T)
+	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
+	@time s_x, s_q, s_r = gibbs_ll(y, A, C, mcmc, burn_in, thin)
+	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
 
-	@time s_x, s_q, s_r = gibbs_ll(y, A, C)
-
-	Q_chain = Chains(reshape(s_q, 3000, 1))
-	R_chain = Chains(reshape(s_r, 3000, 1))
+	Q_chain = Chains(reshape(s_q, n_samples, 1))
+	R_chain = Chains(reshape(s_r, n_samples, 1))
 
 	summary_stats_q = summarystats(Q_chain)
 	summary_stats_r = summarystats(R_chain)
 	summary_df_q = DataFrame(summary_stats_q)
 	summary_df_r = DataFrame(summary_stats_r)
 	println("Q summary stats: ", summary_df_q)
+	println()
 	println("R summary stats: ", summary_df_r)
 
 	x_m = mean(s_x, dims=1)[1,:]
@@ -638,9 +640,12 @@ function test_vb_ll(rnd)
 	T = 500
 	A = 1.0
 	C = 1.0
-	R = 0.2
-	Q = 1.0 
+	R = 0.1
+	Q = 0.5
 	y, x_true = gen_data(A, C, Q, R, 0.0, 1.0, T)
+
+	println("Ground-truth r: ", R)
+	println("Ground-truth q: ", Q)
 
 	model = LocalLevel(y)
 	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
@@ -662,6 +667,8 @@ function test_vb_ll(rnd)
 		println("\nHyperparam optimisation: $t")
 		@time r, q = vb_ll_c(y, hpp_ll, t)
 
+		println("r: ", r)
+		println("q: ", q)
 		μs_f, σs_f2 = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
     	μs_s, _, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
 		println("\n VB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
@@ -673,14 +680,15 @@ end
 function main()
 	println("Running experiments for local level model:\n")
 
-	seeds = [103, 133, 100, 143, 111]
+	seeds = [88, 145, 105, 104, 134]
+	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs_ll(sd)
+		test_gibbs_ll(sd, 30000, 5000, 3)
 		println()
 		test_vb_ll(sd)
 		println("----- END Run seed: $sd -----\n")
-	end
+	ends
 end
 
 #main()

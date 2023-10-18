@@ -216,41 +216,6 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	return inv(E_R_inv), inv(E_Q_inv), el_s
 end
 
-function test_vb(rnd)
-	A_lg = [1.0 1.0; 0.0 1.0]
-    C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.05, 0.03])
-	R_lg = [0.1]
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(rnd)
-	T = 500
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
-	K = size(A_lg, 1)
-	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-	println("\n--- VBEM ---")
-
-	# vbem_his_plot(y, A_lg, C_lg, prior)
-	for t in [false, true]
-		println("\nHyperparam optimisation: $t")
-		@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, t)
-		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
-		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
-		μs_s, _, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
-		println("R:")
-		show(stdout, "text/plain", R)
-		println()
-		println("Q:")
-		show(stdout, "text/plain", Q)
-		println("\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
-		sleep(1)
-	end
-end
-
-#test_vb(111)
-
 # MCMC (gibbs sampling) counter-part
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
     P, T = size(Ys)
@@ -374,8 +339,6 @@ function test_ffbs_x()
 	println("MSE, MAD: ", error_metrics(x_true, xs))
 end
 
-# test_ffbbs_x()
-
 function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	P, T = size(y)
 	K = size(A, 2)
@@ -418,10 +381,10 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(rnd, mcmc=10000, burn_in=5000, thin=1)
+function test_gibbs(rnd, mcmc=20000, burn_in=5000, thin=1)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.6, 0.3])
+	Q_lg = Diagonal([0.5, 0.5])
 	R_lg = [0.1]
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
@@ -434,7 +397,7 @@ function test_gibbs(rnd, mcmc=10000, burn_in=5000, thin=1)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin)
-	println("--- n_samples: $n_samples, burn-in: $burn_in, thining: $thin ---")
+	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
 	Q_chain = Chains(reshape(Qs_samples, n_samples, 4))
 	R_chain = Chains(reshape(Rs_samples, n_samples, 1))
 
@@ -442,12 +405,50 @@ function test_gibbs(rnd, mcmc=10000, burn_in=5000, thin=1)
 	summary_stats_r = summarystats(R_chain)
 	summary_df_q = DataFrame(summary_stats_q)
 	summary_df_r = DataFrame(summary_stats_r)
+
+	summary_df_q = summary_df_q[[1, 4], :]
 	println("Q summary stats: ", summary_df_q)
+	println()
 	println("R summary stats: ", summary_df_r)
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
 	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 	println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+end
+
+#test_gibbs(103)
+
+function test_vb(rnd)
+	A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+	Q_lg = Diagonal([0.5, 0.5])
+	R_lg = [0.1]
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(rnd)
+	T = 500
+	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
+	K = size(A_lg, 1)
+	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	println("\n--- VBEM ---")
+
+	# vbem_his_plot(y, A_lg, C_lg, prior)
+	for t in [false, true]
+		println("\nHyperparam optimisation: $t")
+		@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, t)
+		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
+		μs_s, _, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
+		println("R:")
+		show(stdout, "text/plain", R)
+		println()
+		println("Q:")
+		show(stdout, "text/plain", Q)
+		println("\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		sleep(1)
+	end
 end
 
 function main()
@@ -457,11 +458,12 @@ function main()
 	#seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs(sd, 20000, 5000, 2)
-		test_vb(sd)
+		test_gibbs(sd, 60000, 5000, 3)
+		#test_vb(sd)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
+
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
