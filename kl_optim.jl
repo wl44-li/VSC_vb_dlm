@@ -14,6 +14,7 @@ Pkg.add("Distributions")
 Pkg.add("MultivariateStats")
 Pkg.add("StatsFuns")
 Pkg.add("Dates")
+Pkg.add("CSV")
 using SpecialFunctions
 using LinearAlgebra
 

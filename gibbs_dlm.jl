@@ -646,13 +646,13 @@ function test_gibbs_diag(rnd, mcmc=10000, burn_in=5000, thin=1)
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
 	Random.seed!(rnd)
-	T = 1000
+	T = 500
 	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	K = size(A, 1)
 	D, _ = size(y)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
 	n_samples = Int.(mcmc/thin)
-	println("--- MCMC ---")
+	println("--- MCMC Diagonal Covariances ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_diag(y, A, C, prior, mcmc, burn_in, thin)
 	println("--- n_samples: $n_samples, burn-in: $burn_in, thining: $thin ---")
 	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
@@ -744,11 +744,13 @@ function test_gibbs_cov(rnd, mcmc=10000, burn_in=5000, thin=1)
 	R = Diagonal([0.1, 0.1])
 	T = 500
 	Random.seed!(rnd)
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
 	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	D, _ = size(y)
 	K = size(A, 1)
 	
-	println("\n--- MCMC ---")
+	println("\n--- MCMC Full Covariances ---")
 	n_samples = Int.(mcmc/thin)
 	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
@@ -770,11 +772,15 @@ end
 
 function main()
 	println("Running experiments for full co-variance R, Q:\n")
-	seeds = [88, 145, 105, 104, 134, 103, 133, 100, 143, 111]
+	seeds = [89, 134, 145, 103, 133]
+	#143, 104, 105, 100
+	#seeds = [103, 133, 100, 143, 111]
 	#seeds = [88, 145, 105, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_vb(sd)
+		#test_vb(sd)
+		test_gibbs_diag(sd, 20000, 5000, 1)
+		test_gibbs_cov(sd, 20000, 5000, 1)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
