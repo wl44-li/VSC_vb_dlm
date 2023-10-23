@@ -15,6 +15,7 @@ Pkg.add("MultivariateStats")
 Pkg.add("StatsFuns")
 Pkg.add("Dates")
 Pkg.add("CSV")
+Pkg.add("HypothesisTests")
 using SpecialFunctions
 using LinearAlgebra
 

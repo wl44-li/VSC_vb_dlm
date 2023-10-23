@@ -12,6 +12,7 @@ begin
 	using StatsBase
 	using Dates
 	using DataFrames
+	using HypothesisTests
 end
 
 function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})

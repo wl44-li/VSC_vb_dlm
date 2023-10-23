@@ -13,6 +13,7 @@ begin
 	using StatsBase
 	using Dates
 	using DataFrames
+	using HypothesisTests
 end
 
 function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)

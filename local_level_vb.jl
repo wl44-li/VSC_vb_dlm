@@ -8,6 +8,7 @@ begin
 	using MCMCChains
 	using DataFrames
 	using StatsPlots
+	using HypothesisTests
 end
 
 begin
