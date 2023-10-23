@@ -1,12 +1,13 @@
 include("kl_optim.jl")
 
 begin
-	using Distributions, Plots, Random
+	using Distributions, Random
 	using LinearAlgebra
 	using SpecialFunctions
 	using StateSpaceModels
 	using MCMCChains
 	using DataFrames
+	using StatsPlots
 end
 
 begin

@@ -1,7 +1,7 @@
 include("kl_optim.jl")
 
 begin
-	using Distributions, Plots, Random
+	using Distributions, Random
 	using LinearAlgebra
 	using StatsFuns
 	using MCMCChains

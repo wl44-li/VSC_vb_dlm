@@ -207,3 +207,24 @@ function plot_latent(x_true, x_inf, max_T = 50)
         sleep(1)
     end
 end
+
+function plot_CI_ll(μ_s, σ_s2)
+
+    # https://en.wikipedia.org/wiki/Standard_error
+    lower_bound = μ_s - 1.96 .* sqrt.(σ_s2)
+    upper_bound = μ_s + 1.96 .* sqrt.(σ_s2)
+    
+    # Create time variable for x-axis
+    T = 1:length(μ_s)
+
+    p = plot()
+
+    # Plot the smoothed means and the 95% CI
+    plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
+        abel="95% CI", linewidth=2)
+ 
+    title!("95% CI")
+    display(p)
+    plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+end

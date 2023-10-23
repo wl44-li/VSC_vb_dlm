@@ -1,7 +1,7 @@
 include("kl_optim.jl")
 
 begin
-	using Distributions, Plots, Random
+	using Distributions, Random
 	using LinearAlgebra
 	using StatsFuns
 	using MCMCChains
@@ -35,7 +35,6 @@ function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
     m[:, 1] = a[:, 1] + RR[:, :, 1] * C' * inv(S_1) * (Ys[:, 1] - f_1)
     P[:, :, 1] = RR[:, :, 1] - RR[:, :, 1] * C' * inv(S_1) * C * RR[:, :, 1]
 		
-		# Kalman filter (Prep 4.1)
     for t in 2:T
         # Prediction
         a[:, t] = A * m[:, t-1]
@@ -52,21 +51,19 @@ function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
        	Σ_t = RR[:, :, t] - RR[:, :, t] * C' * inv(S_t) * C * RR[:, :, t]
 		P[:, :, t] = Σ_t
 	end
-	
-		X[:, T] = rand(MvNormal(m[:, T], Symmetric(P[:, :, T])))
+
+	X[:, T] = rand(MvNormal(m[:, T], Symmetric(P[:, :, T])))
 	
 	# backward sampling
 	for t in (T-1):-1:1
 		h_t = m[:, t] +  P[:, :, t] * A' * inv(RR[:, :, t+1])*(X[:, t+1] - a[:, t+1])
 		H_t = P[:, :, t] - P[:, :, t] * A' * inv(RR[:, :, t+1]) * A * P[:, :, t]
-	
 		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 	end
 
 	# sample initial x_0
 	h_0 = μ_0 + Σ_0 * A' * inv(RR[:, :, 1])*(X[:, 1] - a[:, 1])
 	H_0 = Σ_0 - Σ_0 * A' * inv(RR[:, :, 1]) * A * Σ_0
-
 	x_0 = rand((MvNormal(h_0, Symmetric(H_0))))
 
 	return X, x_0
@@ -112,14 +109,13 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1)
 	v_0 = P + 1.0 
 	S_0 = Matrix{Float64}(0.01 * I, P, P)
 
-	v_1 = K + 1.0
-	S_1 = Matrix{Float64}(0.01 * I, K, K)
-	
 	# Initial values for the parameters
 	R⁻¹ = rand(Wishart(v_0, inv(S_0)))
-	Q⁻¹ = rand(Wishart(v_1, inv(S_1)))
+	R = inv(R⁻¹)
 
-	R, Q = inv(R⁻¹), inv(Q⁻¹)
+	α, β = 0.01, 0.01
+	ρ_q = rand(Gamma(α, β), K)
+    Q = Diagonal(1 ./ ρ_q)
 	
 	n_samples = Int.(mcmc/thinning)
 	# Store the samples
@@ -130,11 +126,11 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1)
 	# Gibbs sampler
 	for i in 1:mcmc+burn_in
 	    # Update the states
-		x, x_0 = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
+		x, _ = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
 		
 		# Update the system noise
-		Q = sample_Q_(x, A, v_1, S_1, x_0)
-		
+		Q = sample_Q(x, A, α, β)
+
 	    # Update the observation noise
 		R = sample_R_(y, x, C, v_0, S_0)
 	
@@ -638,16 +634,9 @@ function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs_diag(rnd, mcmc=10000, burn_in=5000, thin=1)
+function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(rnd)
-	T = 500
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	K = size(A, 1)
 	D, _ = size(y)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
@@ -674,26 +663,10 @@ function test_gibbs_diag(rnd, mcmc=10000, burn_in=5000, thin=1)
 	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
 end
 
-#test_gibbs_diag(133)
 
-function test_vb(rnd)
+function test_vb(y, x_true)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
-	T = 500
-
-	println("Ground-truth R:")
-	show(stdout, "text/plain", R)
-	println()
-	println("Ground-truth Q:")
-	show(stdout, "text/plain", Q)
-	println()
-
-	Random.seed!(rnd)
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	K = size(A, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
 	println("\n--- VB with Diagonal Covariances ---")
@@ -737,20 +710,14 @@ function test_vb(rnd)
 	println("MSE, MAD of VB X: ", error_metrics(x_true, μs_s))
 end
 
-function test_gibbs_cov(rnd, mcmc=10000, burn_in=5000, thin=1)
+
+function test_gibbs_cov(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
-	T = 500
-	Random.seed!(rnd)
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	D, _ = size(y)
 	K = size(A, 1)
 	
-	println("\n--- MCMC Full Covariances ---")
+	println("\n--- MCMC R Full Covariances ---")
 	n_samples = Int.(mcmc/thin)
 	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
@@ -761,27 +728,51 @@ function test_gibbs_cov(rnd, mcmc=10000, burn_in=5000, thin=1)
 	summary_stats_r = summarystats(R_chain)
 	summary_df_q = DataFrame(summary_stats_q)
 	summary_df_r = DataFrame(summary_stats_r)
+	summary_df_q = summary_df_q[[1,4], :]
 	println("Q summary stats: ", summary_df_q)
 	println()
 	println("R summary stats: ", summary_df_r)
+	println()
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
 	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
 end
 
-function main()
-	println("Running experiments for full co-variance R, Q:\n")
-	seeds = [89, 134, 145, 103, 133]
-	#143, 104, 105, 100
-	#seeds = [103, 133, 100, 143, 111]
-	#seeds = [88, 145, 105, 104, 134]
+
+function test_data(rnd)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = [0.5 0.2; 0.2 0.5]
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(rnd)
+	T = 500
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	return y, x_true
+end
+
+
+function test_full_R()
+	y, x_true = test_data(108)
+	println("--- Seed: $rnd ---")
+	test_gibbs_diag(y, x_true, 10000, 5000, 1)
+	println()
+	test_gibbs_cov(y, x_true, 10000, 5000, 1) # DEBUG?
+end
+
+#test_full_R()
+
+function com_vb_gibbs()
+	seeds = [92, 134, 103, 133, 233]
+	#188, 199, 233, 234, 236
 	for sd in seeds
-		println("\n----- BEGIN Run seed: $sd -----\n")
-		#test_vb(sd)
-		test_gibbs_diag(sd, 20000, 5000, 1)
-		test_gibbs_cov(sd, 20000, 5000, 1)
-		println("----- END Run seed: $sd -----\n")
+		y, x_true = test_data(sd)
+		println("--- Seed: $sd ---")
+		test_vb(y, x_true)
+		println()
+		test_gibbs_diag(y, x_true, 10000, 5000, 1)
 	end
 end
 
@@ -791,8 +782,8 @@ function out_txt()
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				main()
-			end
+				com_vb_gibbs()
+			end	
 		end
 	end
 end
