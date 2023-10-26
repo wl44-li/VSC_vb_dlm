@@ -508,8 +508,8 @@ function test_vb_ll(rnd)
 	sm = get_smoothed_state(model)
 	smooth_err = error_metrics(x_true, sm)
 
-	println("\nPackage Filtered MSE, MAD: ", filter_err)
-	println("Package Smoother MSE, MAD: ", smooth_err)
+	println("\nMLE Filtered MSE, MAD: ", filter_err)
+	println("MLE Smoother MSE, MAD: ", smooth_err)
 	
 	# gamma prior: shape = 0.01, rate = 100 (scale = 0.01)
 	hpp_ll = Priors_ll(0.01, 100.0, 0.01, 100.0, 0.0, 1.0)

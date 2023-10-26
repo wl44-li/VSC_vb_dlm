@@ -55,7 +55,7 @@ end
 
 
 function error_metrics(true_means, smoothed_means)
-# mean squared error (MSE), mean absolute deviation (MAD)
+    # mean squared error (MSE), mean absolute deviation (MAD)
     T = 0
     if length(size(true_means)) == 1
         T = length(true_means)
