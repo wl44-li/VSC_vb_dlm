@@ -12,7 +12,6 @@ begin
 	using StatsBase
 	using Dates
 	using DataFrames
-	using HypothesisTests
 end
 
 function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
@@ -43,31 +42,30 @@ function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 
     K = size(A, 1)
     μ_0, Σ_0 = prior.μ_0, prior.Σ_0
     
-    # Initialize the filtered means and covariances
+    # Initialize the filtered means and co-variances
     μ_f = zeros(K, T)
     Σ_f = zeros(K, K, T)
     f_s = zeros(P, T)
 	S_s = zeros(P, P, T)
+
     # Set the initial filtered mean and covariance to their prior values
 	A_1 = A * μ_0
 	R_1 = A * Σ_0 * A' + E_Q
 	
-	f_1 = C * A_1
-	S_1 = C * R_1 * C' + E_R
-	f_s[:, 1] = f_1
-	S_s[:, :, 1] = S_1
+	f_s[:, 1] = f_1 = C * A_1
+	S_s[:, :, 1] = S_1 = C * R_1 * C' + E_R
 	
     μ_f[:, 1] = A_1 + R_1 * C'* inv(S_1) * (y[:, 1] - f_1)
     Σ_f[:, :, 1] = R_1 - R_1*C'*inv(S_1)*C*R_1 
     
     # Forward pass (kalman filter)
-    for t = 2:T
+    for t in 2:T
         μ_p = A * μ_f[:, t-1]
         Σ_p = A * Σ_f[:, :, t-1] * A' + E_Q
-		f_t = C * μ_p
-		S_t = C * Σ_p * C' + E_R
-		f_s[:, t] = f_t
-		S_s[:, :, t] = S_t
+
+		f_s[:, t] = f_t = C * μ_p
+		S_s[:, :, t] = S_t = C * Σ_p * C' + E_R
+
 		μ_f[:, t] = μ_p + Σ_p * C' * inv(S_t) * (y[:, t] - f_t)
 		Σ_f[:, :, t] = Σ_p - Σ_p * C' * inv(S_t) * C * Σ_p
     end
@@ -135,7 +133,7 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 	return E_R_inv, E_Q_inv
 end
 
-function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=100)
+function vbem_RQ_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=100)
     P, T = size(y)
     K, _ = size(A)
 
@@ -170,10 +168,11 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
         plot!(5:max_iter, [E_Q_history[i, i, t] for t in 5:max_iter], label = "Q[$i, $i]")
     end
 	
-	function_name = "R_Q_Progress"
+	# function_name = "R_Q_Progress"
 	p = plot(p1, p2, layout = (1, 2))
-	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+	# plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+    # savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+	return p
 end
 
 function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=5e-4)
@@ -217,7 +216,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	return inv(E_R_inv), inv(E_Q_inv), el_s
 end
 
-# MCMC (gibbs sampling) counter-part
+# MCMC (gibbs sampling) 
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
     P, T = size(Ys)
     ρ_sampled = zeros(P)
@@ -228,6 +227,8 @@ function sample_R(Xs, Ys, C, a_ρ, b_ρ)
 		
         ρ_sampled[i] = rand(Gamma(a_post, 1 / b_post))
     end
+
+	# inverse precision is variance
     return diagm(1 ./ ρ_sampled)
 end
 
@@ -272,52 +273,50 @@ function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
     d, _ = size(A)
 	
     # Initialize
-    m = zeros(d, T)
-	P = zeros(d, d, T)
+    ms = zeros(d, T)
+	Cs = zeros(d, d, T)
 	
-	a = zeros(d, T)
-	RR = zeros(d, d, T)
+	as = zeros(d, T)
+	Rs = zeros(d, d, T)
 	X = zeros(d, T)
 
-	a[:, 1] = A * μ_0
-	P_1 = A * Σ_0 * A' + Q
-	RR[:, :, 1] = P_1
-	f_1 = C * a[:, 1]
-    S_1 = C * P_1 * C' + R
-    m[:, 1] = a[:, 1] + RR[:, :, 1] * C' * inv(S_1) * (Ys[:, 1] - f_1)
-    P[:, :, 1] = RR[:, :, 1] - RR[:, :, 1] * C' * inv(S_1) * C * RR[:, :, 1]
+	as[:, 1] = a_1 = A * μ_0
+	Rs[:, :, 1] = R_1 = A * Σ_0 * A' + Q
+
+	f_1 = C * a_1
+    S_1 = C * R_1 * C' + R
+
+    ms[:, 1] = a_1 + R_1 * C' * inv(S_1) * (Ys[:, 1] - f_1)
+    Cs[:, :, 1] = R_1 - R_1 * C' * inv(S_1) * C * R_1
 		
-		# Kalman filter (Prep 4.1)
+	# forward filter 
     for t in 2:T
-        # Prediction
-        a[:, t] = A * m[:, t-1]
-        P_t = A * P[:, :, t-1] * A' + Q
-		RR[:, :, t] = P_t
+        # latent one-step ahead prediction
+        as[:, t] = a_t = A * ms[:, t-1]
+        Rs[:, :, t] = R_t = A * Cs[:, :, t-1] * A' + Q
 		
-		# Update
-        f_t = C * a[:, t]
-        S_t = C * P_t * C' + R
+		# y Update
+        f_t = C * a_t
+        S_t = C * R_t * C' + R
 
 		# filter 
-        m[:, t] = a[:, t] + RR[:, :, t] * C' * inv(S_t) * (Ys[:, t] - f_t)
-
-       	Σ_t = RR[:, :, t] - RR[:, :, t] * C' * inv(S_t) * C * RR[:, :, t]
-		P[:, :, t] = Σ_t
+        ms[:, t] = a_t + R_t * C' * inv(S_t) * (Ys[:, t] - f_t)
+		Cs[:, :, t] = R_t - R_t * C' * inv(S_t) * C * R_t
 	end
-		# TO-DO: Use Chloesky method to sample uni-variate Gaussian rather than using MVNormal
-		X[:, T] = rand(MvNormal(m[:, T], Symmetric(P[:, :, T])))
+
+		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	
 	# backward sampling
 	for t in (T-1):-1:1
-		h_t = m[:, t] +  P[:, :, t] * A' * inv(RR[:, :, t+1])*(X[:, t+1] - a[:, t+1])
-		H_t = P[:, :, t] - P[:, :, t] * A' * inv(RR[:, :, t+1]) * A * P[:, :, t]
+		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t+1])*(X[:, t+1] - as[:, t+1])
+		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t+1]) * A * Cs[:, :, t]
 	
 		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 	end
 
 	# sample initial x_0
-	h_0 = μ_0 + Σ_0 * A' * inv(RR[:, :, 1])*(X[:, 1] - a[:, 1])
-	H_0 = Σ_0 - Σ_0 * A' * inv(RR[:, :, 1]) * A * Σ_0
+	h_0 = μ_0 + Σ_0 * A' * inv(Rs[:, :, 1])*(X[:, 1] - as[:, 1])
+	H_0 = Σ_0 - Σ_0 * A' * inv(Rs[:, :, 1]) * A * Σ_0
 
 	x_0 = rand((MvNormal(h_0, Symmetric(H_0))))
 
@@ -327,7 +326,7 @@ end
 function test_ffbs_x()
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.05, 0.03])
+	Q_lg = Diagonal([0.5, 0.3])
 	R_lg = [0.1]
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
@@ -336,11 +335,10 @@ function test_ffbs_x()
 	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 
 	xs, _ = ffbs_x(y, A_lg, C_lg, R_lg, Q_lg, μ_0, Σ_0)
-
 	println("MSE, MAD: ", error_metrics(x_true, xs))
 end
 
-function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
+function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug = false)
 	P, T = size(y)
 	K = size(A, 2)
 	
@@ -350,6 +348,7 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
 	ρ_r = rand(Gamma(a, b), P)
     R = Diagonal(1 ./ ρ_r)
+
 	ρ_q = rand(Gamma(α, β), K)
     Q = Diagonal(1 ./ ρ_q)
 
@@ -361,6 +360,9 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	
 	# Gibbs sampler
 	for i in 1:mcmc+burn_in
+		if debug
+			println("MCMC diagonal R, Q debug, iteration : $i")
+		end
 	    # Update the states
 		x, _ = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
 		
@@ -382,23 +384,17 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1)
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(rnd, mcmc=20000, burn_in=5000, thin=1)
+function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.5, 0.5])
-	R_lg = [0.1]
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(rnd)
-	T = 500
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 	K = size(A_lg, 1)
 
-	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	# Debug: different hyper-parameter usages 
+	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin)
-	println("--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin, debug)
+	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---\n")
 	Q_chain = Chains(reshape(Qs_samples, n_samples, 4))
 	R_chain = Chains(reshape(Rs_samples, n_samples, 1))
 
@@ -413,58 +409,71 @@ function test_gibbs(rnd, mcmc=20000, burn_in=5000, thin=1)
 	println("R summary stats: ", summary_df_r)
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
-	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
-	println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+	xs_std = std(Xs_samples, dims=1)[1, :, :]
+	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+
+	#println("size of xs_mean, xs_std: ", size(xs_m), size(xs_std))
+	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
 end
 
 #test_gibbs(103)
 
-function test_vb(rnd)
+function test_vb(y, x_true)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.5, 0.5])
-	R_lg = [0.1]
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(rnd)
-	T = 500
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 	K = size(A_lg, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
 	println("\n--- VBEM ---")
 
-	# vbem_his_plot(y, A_lg, C_lg, prior)
 	for t in [false, true]
-		println("\nHyperparam optimisation: $t")
+		println("\nHyper-param optimisation: $t")
 		@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, t)
 		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
 		μs_s, _, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
-		println("R:")
+		println("\nVB q(R):")
 		show(stdout, "text/plain", R)
-		println()
-		println("Q:")
+		println("\n\nVB q(Q):")
 		show(stdout, "text/plain", Q)
-		println("\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+
+		#println("size of μs_s: ", size(μs_s))
+
 		sleep(1)
 	end
+end
+
+function gen_test_data(rnd, max_T = 1000)
+	A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+	Q = Diagonal([1.0, 1.0])
+	R = [0.1]
+	K = size(A_lg, 1)
+	μ_0 = zeros(K)
+	Σ_0 = Diagonal(ones(K))
+	Random.seed!(rnd)
+	y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
+	return y, x_true
 end
 
 function main()
 	println("Running experiments for linear growth model:\n")
 
 	seeds = [103, 133, 100, 143, 111]
-	#seeds = [88, 145, 105, 104, 134]
+	#seeds = [88, 145, 100, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs(sd, 60000, 5000, 3)
-		#test_vb(sd)
+		y, x_true = gen_test_data(sd)
+		test_gibbs(y, x_true, 20000, 10000, 1)
+		println()
+		test_vb(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
+#main()
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

@@ -8,241 +8,18 @@ begin
 	using MCMCChains
 	using DataFrames
 	using StatsPlots
-	using HypothesisTests
 end
 
 begin
-	struct HPP_uni
-	    a::Float64
-	    b::Float64
-	    α::Float64
-	    γ::Float64
-		μ₀::Float64
-		σ₀::Float64
-	end
-	
 	struct HSS_uni
 	    W_A::Float64
 	    S_A::Float64
 	    W_C::Float64
 	    S_C::Float64
 	end
-
-	struct Exp_ϕ_uni
-		A
-		C
-		R⁻¹
-		AᵀA
-		CᵀR⁻¹C
-		R⁻¹C
-		CᵀR⁻¹
-	end
 end
 
-function vb_m_uni(y::Vector{Float64}, hss::HSS_uni, hpp::HPP_uni)
-	T = length(y)
-    a, b, α, γ, μ_0, σ_0 = hpp.a, hpp.b, hpp.α, hpp.γ, hpp.μ₀, hpp.σ₀
-	W_A, S_A, W_C, S_C = hss.W_A, hss.S_A, hss.W_C, hss.S_C
-
-	σ_A = 1 / (α + W_A)
-    σ_C = 1 / (γ + W_C)	
-	G = y' * y - S_C * σ_C * S_C
-
-	# Update parameters of Gamma distribution
-	a_n = a + 0.5 * T
-	b_n = b + 0.5 * G
-
-	q_ρ = Gamma(a_n, 1 / b_n)
-	ρ̄ = mean(q_ρ)
-
-	Exp_A = S_A*σ_A
-	Exp_C = S_C*σ_C
-	Exp_R⁻¹ = ρ̄
-
-	Exp_AᵀA = Exp_A^2 + σ_A
-    Exp_CᵀR⁻¹C = Exp_C^2 * Exp_R⁻¹ + σ_C
-    Exp_R⁻¹C = Exp_C * Exp_R⁻¹
-    Exp_CᵀR⁻¹ = Exp_R⁻¹C 
-
-	return Exp_ϕ_uni(Exp_A, Exp_C, Exp_R⁻¹, Exp_AᵀA, Exp_CᵀR⁻¹C, Exp_R⁻¹C, Exp_CᵀR⁻¹)
-end
-
-function v_forward(y::Vector{Float64}, exp_np::Exp_ϕ_uni, μ_0, σ_0)
-	T = length(y)
-
-    μs = zeros(T)
-    σs = zeros(T)
-	σs_ = zeros(T)
-	
-	# TO-DO: ELBO and convergence check
-	#Qs = zeros(D, D, T)
-	#fs = zeros(D, T)
-
-	# initialise for t=1
-	σ₀_ = 1 / (σ_0^(-1) + exp_np.AᵀA)
-	σs_[1] = σ₀_
-	
-    σs[1] = 1/ (1.0 + exp_np.CᵀR⁻¹C - exp_np.A*σ₀_*exp_np.A)
-    μs[1] = σs[1]*(exp_np.CᵀR⁻¹*y[1] + exp_np.A*σ₀_*σ_0^(-1)*μ_0)
-
-	# iterate over T
-	for t in 2:T
-		σₜ₋₁_ = 1/ ((σs[t-1])^(-1) + exp_np.AᵀA)
-		σs_[t] = σₜ₋₁_
-		
-		σs[t] = 1/ (1.0 + exp_np.CᵀR⁻¹C - exp_np.A*σₜ₋₁_*exp_np.A)
-    	μs[t] = σs[t]*(exp_np.CᵀR⁻¹*y[t] + exp_np.A*σₜ₋₁_*(σs[t-1])^(-1)*μs[t-1])
-
-	end
-
-	return μs, σs, σs_
-end
-
-function v_backward(y::Vector{Float64}, exp_np::Exp_ϕ_uni)
-	T = length(y)
-	ηs = zeros(T)
-    Ψs = zeros(T)
-
-    # Initialize the filter, t=T, β(x_T-1)
-	Ψs[T] = 0.0
-    ηs[T] = 1.0
-	
-	Ψₜ = 1/(1.0 + exp_np.CᵀR⁻¹C)
-	Ψs[T-1] = 1/ (exp_np.AᵀA - exp_np.A*Ψₜ*exp_np.A)
-	ηs[T-1] = Ψs[T-1]*exp_np.A*Ψₜ*exp_np.CᵀR⁻¹*y[T]
-	
-	for t in T-2:-1:1
-		Ψₜ₊₁ = 1/(1.0 + exp_np.CᵀR⁻¹C + (Ψs[t+1])^(-1))
-		
-		Ψs[t] = 1/ (exp_np.AᵀA - exp_np.A*Ψₜ₊₁*exp_np.A)
-		ηs[t] = Ψs[t]*exp_np.A*Ψₜ₊₁*(exp_np.CᵀR⁻¹*y[t+1] + (Ψs[t+1])^(-1)*ηs[t+1])
-	end
-
-	# for t=1, this correspond to β(x_0), the probability of all the data given the setting of the auxiliary x_0 hidden state.
-	Ψ₁ = 1/ (1.0 + exp_np.CᵀR⁻¹C + (Ψs[1])^(-1))
-	Ψ_0 = 1/ (exp_np.AᵀA - exp_np.A*Ψ₁*exp_np.A)
-	η_0 = Ψs[1]*exp_np.A*Ψ₁*(exp_np.CᵀR⁻¹*y[1] + (Ψs[1])^(-1)*ηs[1])
-	
-	return ηs, Ψs, η_0, Ψ_0
-end
-
-function parallel_smoother(μs, σs, ηs, Ψs, η_0, Ψ_0, μ_0, σ_0)
-	T = length(μs)
-	Υs = zeros(T)
-	ωs = zeros(T)
-
-	# ending condition t=T
-	Υs[T] = σs[T]
-	ωs[T] = μs[T]
-	
-	for t in 1:(T-1)
-		Υs[t] = 1 / ((σs[t])^(-1) + (Ψs[t])^(-1))
-		ωs[t] = Υs[t]*((σs[t])^(-1)*μs[t] + (Ψs[t])^(-1)*ηs[t])
-	end
-
-	# t = 0
-	Υ_0 = 1 / ((σ_0)^(-1) + (Ψ_0)^(-1))
-	ω_0 = Υ_0*((σ_0)^(-1)μ_0 + (Ψ_0)^(-1)η_0)
-	
-	return ωs, Υs, ω_0, Υ_0
-end
-
-function v_pairwise_x(σs_, exp_np::Exp_ϕ_uni, Ψs)
-	T = length(σs_)
-
-	# cross-covariance is then computed for all time steps t = 0, ..., T−1
-	Υ_ₜ₋ₜ₊₁ = zeros(T)
-	
-	for t in 1:T-2
-		Υ_ₜ₋ₜ₊₁[t+1] = σs_[t+1]*exp_np.A*(1.0 + exp_np.CᵀR⁻¹C + (Ψs[t+1])^(-1) - exp_np.A*σs_[t+1]*exp_np.A)^(-1)
-	end
-
-	# t=0, the cross-covariance between the zeroth and first hidden states.
-	Υ_ₜ₋ₜ₊₁[1] = σs_[1]*exp_np.A*(1.0 + exp_np.CᵀR⁻¹C + (Ψs[1])^(-1) - exp_np.A*σs_[1]*exp_np.A)^(-1)
-
-	# t=T-1, Ψs[T] = 0 special case
-	Υ_ₜ₋ₜ₊₁[T] = σs_[T]*exp_np.A*(1.0 + exp_np.CᵀR⁻¹C - exp_np.A*σs_[T]*exp_np.A)^(-1)
-	
-	return Υ_ₜ₋ₜ₊₁
-end
-
-function vb_e_uni(y::Vector{Float64}, hpp::HPP_uni, exp_np::Exp_ϕ_uni, smooth_out = false)
-	T = length(y)
-
-	# forward pass
-	μs, σs, σs_ = v_forward(y, exp_np, hpp.μ₀, hpp.σ₀)
-
-	# backward pass 
-	ηs, Ψs, η₀, Ψ₀ = v_backward(y, exp_np)
-
-	# marginal (smoothed) means, covs, and pairwise beliefs 
-	ωs, Υs, ω_0, Υ_0 = parallel_smoother(μs, σs, ηs, Ψs, η₀, Ψ₀, hpp.μ₀, hpp.σ₀)
-	Υ_ₜ₋ₜ₊₁ = v_pairwise_x(σs_, exp_np, Ψs)
-
-	# hidden state sufficient stats 
-	W_A = sum(Υs[t-1] + ωs[t-1] * ωs[t-1] for t in 2:T)
-	W_A += Υ_0 + ω_0*ω_0
-
-	S_A = sum(Υ_ₜ₋ₜ₊₁[t] + ωs[t-1] * ωs[t] for t in 2:T)
-	S_A += Υ_ₜ₋ₜ₊₁[1] + ω_0*ωs[1]
-	
-	W_C = sum(Υs[t] + ωs[t] * ωs[t] for t in 1:T)
-	S_C = sum(ωs[t] * y[t] for t in 1:T)
-
-	if (smooth_out)
-		return ωs, Υs
-	end
-	
-	return HSS_uni(W_A, S_A, W_C, S_C), ω_0, Υ_0
-end
-
-
-function vb_dlm(y::Vector{Float64}, hpp::HPP_uni, max_iter=1000)
-	T = length(y)
-	W_A = 1.0
-	S_A = 1.0
-	W_C = 1.0
-	S_C = 1.0
-	
-	hss = HSS_uni(W_A, S_A, W_C, S_C)
-	exp_np = missing
-	
-	for i in 1:max_iter
-		exp_np = vb_m_uni(y, hss, hpp)
-				
-		hss, ω_0, Υ_0 = vb_e_uni(y, hpp, exp_np)
-	end
-
-	return exp_np
-end
-
-
-function vb_ll_his(y::Vector{Float64}, hpp::HPP_uni, max_iter=1000)
-	T = length(y)
-	
-	hss = HSS_uni(1.0, 1.0, 1.0, 1.0)
-	exp_np = missing
-
-	history_A = Vector{Float64}(undef, max_iter - 50)
-    history_C = Vector{Float64}(undef, max_iter - 50)
-    history_R = Vector{Float64}(undef, max_iter - 50)
-	
-	for i in 1:max_iter
-		exp_np = vb_m_uni(y, hss, hpp)
-				
-		hss, ω_0, Υ_0 = vb_e_uni(y, hpp, exp_np)
-
-		if(i > 50) # discard the first 10 to see better plots
-			history_A[i-50] = exp_np.A
-			history_C[i-50] = exp_np.C
-       		history_R[i-50] = 1/exp_np.R⁻¹
-		end
-	end
-
-	return exp_np, history_A, history_C, history_R
-end
-
-# Gibbs sampling
+# Gibbs sampling analog to Beale
 function sample_a(xs, q)
 	T = length(xs)
 	return rand(Normal(sum(xs[1:T-1] .* xs[2:T]) / sum(xs[1:T-1].^2), sqrt(q / sum(xs[1:T-1].^2))))
@@ -256,6 +33,8 @@ function sample_r(xs, ys, c, α_r, β_r)
 	T = length(ys)
     α_post = α_r + T / 2
     β_post = β_r + sum((ys - c * xs).^2) / 2
+
+	# emission precision posterior [Re-used later]
 	λ_r = rand(Gamma(α_post, 1 / β_post))
 	return 1/λ_r # inverse precision is variance
 end
@@ -267,7 +46,7 @@ function sample_x_ffbs(y, A, C, Q, R, μ_0, σ_0)
     μs[1] = μ_0
     σs[1] = σ_0
 	
-    for t in 2:T #forward
+    for t in 2:T # forward filter
         μ_pred = A * μs[t-1]
         σ_pred = A * σs[t-1] * A + Q
         K = σ_pred * C * (1/ (C^2 * σ_pred + R))
@@ -279,7 +58,7 @@ function sample_x_ffbs(y, A, C, Q, R, μ_0, σ_0)
 	x = Vector{Float64}(undef, T)
     x[T] = rand(Normal(μs[T], sqrt(σs[T])))
 
-    for t in (T-1):-1:1 #backward
+    for t in (T-1):-1:1 # backward sample
         μ_cond = μs[t] + σs[t] * A * (1/ (A * σs[t] * A + Q)) * (x[t+1] - A * μs[t])
         σ_cond = σs[t] - σs[t] * A * (1/ (A * σs[t] * A + Q)) * A * σs[t]
         x[t] = rand(Normal(μ_cond, sqrt(σ_cond)))
@@ -298,7 +77,7 @@ function gibbs_uni_dlm(y, num_iterations=2000, burn_in=200, thinning=5)
 	a = rand(Normal(μ_0, λ_0))
 	c = rand(Normal(μ_0, λ_0))
 	r = rand(InverseGamma(α, β))
-	q = 1.0
+	q = 1.0 # assumed fixed
 
 	n_samples = Int.(num_iterations/thinning)
 	# Store the samples
@@ -333,14 +112,16 @@ function gibbs_uni_dlm(y, num_iterations=2000, burn_in=200, thinning=5)
 	return samples_x, samples_a, samples_c, samples_r
 end
 
-# DLM with R
+# DLM with R, r, q as unknown, given a, c
 function sample_q(xs, a, α_q, β_q, x_0)
 	T = length(xs)
     α_post = α_q + T / 2
     β_post = β_q + sum((xs[2:T] .- (a .* xs[1:T-1])).^2) /2 
 	
 	β_post += (xs[1] - a * x_0)^2 /2
-	λ_q = rand(Gamma(α_post, 1 / β_post))
+
+	# system precision posterior
+	λ_q = rand(Gamma(α_post, 1 / β_post)) 
 	
 	return 1/λ_q # inverse precision is variance
 end
@@ -354,8 +135,8 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
 	β = 0.01  # Scale parameter for Inverse-Gamma prior
 	
 	# Initial values for the parameters
-	r = rand(InverseGamma(α, β))
-	q = rand(InverseGamma(α, β))
+	r = rand(InverseGamma(α, 1/β))
+	q = rand(InverseGamma(α, 1/β))
 
 	n_samples = Int.(mcmc/thinning)
 	# Store the samples
@@ -366,7 +147,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
 	# Gibbs sampler
 	for i in 1:mcmc+burn_in
 	    # Update the states
-		x = sample_x_ffbs(y, a, c, q, r, μ_0, 1/λ_0)
+		x = sample_x_ffbs(y, a, c, q, r, μ_0, λ_0)
 		
 		# Update the system noise
 		q = sample_q(x, a, α, β, μ_0)
@@ -410,9 +191,17 @@ function test_gibbs_ll(rnd, mcmc=10000, burn_in=5000, thin=1)
 	println()
 	println("R summary stats: ", summary_df_r)
 
-	x_m = mean(s_x, dims=1)[1,:]
-	println("\nend chain x sample error ", error_metrics(x_true, s_x[end,: ]))
+	x_m = mean(s_x, dims=1)[1, :]
+	#println("\nend chain x sample error ", error_metrics(x_true, s_x[end,: ]))
 	println("average x sample error " , error_metrics(x_true, x_m))
+
+	x_std = std(s_x, dims=1)[1, :]
+
+	# Create a latent x inference plot
+	p = plot_CI_ll(x_m, x_std, x_true)
+	display(p)
+
+	return x_m, x_std
 end
 
 begin
@@ -497,7 +286,7 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
 	# dlm pg53. beale p175
 	log_z = sum(logpdf(Normal(fs[i], sqrt(ss[i])), y[i]) for i in 1:T)
 	
-    return μ_f, σ_f2, log_z
+    return μ_f, σ_f2, fs, ss, log_z
 end
 
 function backward_ll(μ_f, σ_f2, E_τ_q, priors::Priors_ll)
@@ -531,7 +320,7 @@ end
 
 function vb_e_ll(y, E_τ_r, E_τ_q, priors::Priors_ll)
     # Forward pass (filter)
-    μs_f, σs_f2, log_Z = forward_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, priors)
+    μs_f, σs_f2, _, _ , log_Z = forward_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, priors)
 
     # Backward pass (smoother)
     μs_s, σs_s2, μs_0, σs_s0, σs_s2_cross = backward_ll(μs_f, σs_f2, E_τ_q, priors)
@@ -606,6 +395,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	E_τ_r, E_τ_q  = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
+	qθ = missing
 	for i in 1:max_iter
 		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)
 		hss, μs_0, σs_s0, log_z = vb_e_ll(y, E_τ_r, E_τ_q, hpp)
@@ -634,7 +424,66 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 		end
 	end
 
-	return 1/E_τ_r, 1/E_τ_q, el_s
+	return 1/E_τ_r, 1/E_τ_q, el_s, qθ
+end
+
+function plot_rq_CI(q::qθ)
+
+	# Create a Gamma distribution object
+	gamma_dist_q = Gamma(q.α_q_p, 1/q.β_q_p)  # Note: The Gamma constructor in Julia uses the scale parameter, which is 1/β.
+
+	# Compute the 95% credible interval
+	ci_lower = quantile(gamma_dist_q, 0.025)
+	ci_upper = quantile(gamma_dist_q, 0.975)
+
+	# Create a range of x values for plotting
+	x = range(0, stop=ci_upper + 1, length=100)  # extend the range a bit beyond the upper bound of the CI
+
+	# Compute the PDF values for the Gamma distribution
+	pdf_values = pdf.(gamma_dist_q, x)
+
+	# Plot the Gamma distribution
+	τ_q = plot(x, pdf_values, label="τ_q", lw=2, xlabel="precision", ylabel="Density")
+
+	# Highlight the 95% credible interval
+	plot!([ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
+
+	display(τ_q)
+
+	gamma_dist_r = Gamma(q.α_r_p, 1/q.β_r_p)  # Note: The Gamma constructor in Julia uses the scale parameter, which is 1/β.
+	ci_lower = quantile(gamma_dist_r, 0.025)
+	ci_upper = quantile(gamma_dist_r, 0.975)
+	x = range(0, stop=ci_upper + 1, length=100)  # extend the range a bit beyond the upper bound of the CI
+	pdf_values = pdf.(gamma_dist_r, x)
+	τ_r = plot(x, pdf_values, label="τ_r", lw=2, xlabel="precision", ylabel="Density")
+
+	plot!([ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
+	display(τ_r)
+end
+
+function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
+	# μ_s :: vector of normal mean
+	# σ_s2 :: vector of corresponding variance
+	μ_s = μ_s[1:max_T]
+	σ_s2 = σ_s2[1:max_T]
+	x_true = x_true[1:max_T]
+
+	# https://en.wikipedia.org/wiki/Standard_error, 95% CI
+	lower_bound = μ_s - 1.96 .* sqrt.(σ_s2)
+	upper_bound = μ_s + 1.96 .* sqrt.(σ_s2)
+	
+	# Create time variable for x-axis
+	T = 1:max_T
+	p = plot()
+
+	# Plot the smoothed means and the 95% CI
+	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
+		label="95% CI", linewidth=2)
+	
+	plot!(T, x_true, label = "ground_truth")
+	return p
 end
 
 function test_vb_ll(rnd)
@@ -662,38 +511,56 @@ function test_vb_ll(rnd)
 	println("\nPackage Filtered MSE, MAD: ", filter_err)
 	println("Package Smoother MSE, MAD: ", smooth_err)
 	
-	hpp_ll = Priors_ll(0.01, 0.01, 0.01, 0.01, 0.0, 1.0)
+	# gamma prior: shape = 0.01, rate = 100 (scale = 0.01)
+	hpp_ll = Priors_ll(0.01, 100.0, 0.01, 100.0, 0.0, 1.0)
+
+	x_ht = missing
+	x_hf = missing
 
 	println("\n--- VBEM ---")
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
-		@time r, q = vb_ll_c(y, hpp_ll, t)
+		@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, t)
+		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t, Seed: $rnd")
+		display(p)
+		μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+    	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
+		sleep(1)
 
-		println("r: ", r)
-		println("q: ", q)
-		μs_f, σs_f2 = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
-    	μs_s, _, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
-		println("\n VB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+		if t == true
+			x_ht = μs_s
+		else
+			x_hf = μs_s
+		end
+
+		println("\nVB q(r) mode: ", r)
+		println("VB q(q) mode: ", q)
+		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+	
+		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
+		title!("Local Level x 95% CI, Hyper-param update: $t")
+		display(x_plot)
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		plot_rq_CI(q_rq)
+		sleep(1)
 	end
 end
 
-#test_vb_ll()
+#test_vb_ll(100)
 
 function main()
 	println("Running experiments for local level model:\n")
-
 	seeds = [88, 145, 105, 104, 134]
 	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs_ll(sd, 30000, 5000, 3)
+		test_gibbs_ll(sd, 20000, 10000, 1)
 		println()
 		test_vb_ll(sd)
 		println("----- END Run seed: $sd -----\n")
-	ends
+	end
 end
-
-#main()
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

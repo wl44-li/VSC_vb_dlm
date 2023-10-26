@@ -1,23 +1,31 @@
-import Pkg
-Pkg.add("MCMCChains")
-Pkg.add("StatsBase")
-Pkg.add("PDMats")
-Pkg.add("Statistics")
-Pkg.add("StatsPlots")
-Pkg.add("DataFrames")
-Pkg.add("SpecialFunctions")
-Pkg.add("LinearAlgebra")
-Pkg.add("Plots")
-Pkg.add("Random")
-Pkg.add("StateSpaceModels")
-Pkg.add("Distributions")
-Pkg.add("MultivariateStats")
-Pkg.add("StatsFuns")
-Pkg.add("Dates")
-Pkg.add("CSV")
-Pkg.add("HypothesisTests")
+# import Pkg
+# Pkg.add("MCMCChains")
+# Pkg.add("StatsBase")
+# Pkg.add("PDMats")
+# Pkg.add("Statistics")
+# Pkg.add("StatsPlots")
+# Pkg.add("DataFrames")
+# Pkg.add("SpecialFunctions")
+# Pkg.add("LinearAlgebra")
+# Pkg.add("Plots")
+# Pkg.add("Random")
+# Pkg.add("StateSpaceModels")
+# Pkg.add("Distributions")
+# Pkg.add("MultivariateStats")
+# Pkg.add("StatsFuns")
+# Pkg.add("Dates")
+# Pkg.add("CSV")
+# Pkg.add("Revise")
+
+"""
+Commentted out for faster project loading
+
+    TO-DO: relevant Project.toml and Manifest.toml files for environment management
+"""
+
 using SpecialFunctions
 using LinearAlgebra
+using Dates
 
 function kl_Wishart(ν_q, S_q, ν_0, S_0)
 	k = size(S_0, 1)
@@ -190,42 +198,30 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
     end
 end
 
+
 function plot_latent(x_true, x_inf, max_T = 50)
-# assume both are T x k
+    # assume both are T x k
     T, K = size(x_true)
 
     if T < max_T
         max_T = T
     end
-
-    for i in 1:K
-        p = plot()
-        plot!(p, x_true[T-max_T+1:T, i], label="x_true_$i")
-        plot!(p, x_inf[T-max_T+1:T, i], label="x_inf_$i")
-        display(p)
-        plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-        sleep(1)
-    end
-end
-
-function plot_CI_ll(μ_s, σ_s2)
-
-    # https://en.wikipedia.org/wiki/Standard_error
-    lower_bound = μ_s - 1.96 .* sqrt.(σ_s2)
-    upper_bound = μ_s + 1.96 .* sqrt.(σ_s2)
-    
-    # Create time variable for x-axis
-    T = 1:length(μ_s)
-
     p = plot()
 
-    # Plot the smoothed means and the 95% CI
-    plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
-        abel="95% CI", linewidth=2)
- 
-    title!("95% CI")
-    display(p)
-    plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+    if K > 1
+        for i in 1:K
+            plot!(p, x_true[T-max_T+1:T, i], label="x_true_$i")
+            plot!(p, x_inf[T-max_T+1:T, i], label="x_inf_$i")
+            display(p)
+            # plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+            # savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+            sleep(1)
+        end
+    else
+        plot!(p, x_true[T-max_T+1:T], label="x_true")
+        plot!(p, x_inf[T-max_T+1:T], label="x_inf")
+        display(p)
+    end
+
+    return p
 end

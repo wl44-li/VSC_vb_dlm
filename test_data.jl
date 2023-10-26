@@ -7,9 +7,6 @@ end
 function load_csv_to_matrix(file_path::String)
     # Read the CSV file into a DataFrame
     df = CSV.File(file_path) |> DataFrame
-
-    # Assume you want to extract all columns into a matrix
-    # You can adjust the column selection as needed
     y = df[!, end]
     y = reshape(y, (1, length(y)))  # Reshape the vector into a 1×n matrix
     return y
@@ -17,13 +14,10 @@ end
 
 function main()
     # Specify the path to the CSV file
-    file_path = "./_data/UKgas.csv"
-
-    #file_path = "./_data/Nile.csv"
-    # Load the CSV data into a matrix
+    # Other dataset available from StateSpaceModels: https://lampspuc.github.io/StateSpaceModels.jl/latest/manual/#Datasets
+    file_path = "./_data/Nile.csv"
     y = load_csv_to_matrix(file_path)
     println(size(y))
-    println(y)
 end
 
-main()
+#main()
