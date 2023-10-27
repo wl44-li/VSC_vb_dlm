@@ -125,7 +125,7 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	α <= 1 the mode is at 0, otherwise the mode is away from 0
 	when β (rate, inverse-scale) decreases, horizontal scale decreases, squeeze left and up
 	"""
-	α, β = 10, 10
+	α, β = 100, 100
 	ρ_q = rand(Gamma(α, β), K)
     Q = Diagonal(1 ./ ρ_q)
 	
@@ -618,6 +618,7 @@ function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1, 
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
 	ρ_r = rand(Gamma(a, b), P)
     R = Diagonal(1 ./ ρ_r)
+
 	ρ_q = rand(Gamma(α, β), K)
     Q = Diagonal(1 ./ ρ_q)
 
@@ -655,13 +656,13 @@ function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1, 
 end
 
 function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
-	A = [1.0 0.0; 0.0 1.0]
+	A = [1.0 0.0; 0.0 1.0] 
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
 	D, _ = size(y)
 
 	# DEBUG, slightly different choice of prior
-	prior = HPP_D(10, 10, 10, 10, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
 
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC Diagonal Covariances ---")
@@ -791,26 +792,27 @@ end
 #test_ffbs()
 
 function test_gibbs()
-	seeds = [92, 134, 103, 133, 233]
-	#108, 123, 
+	seeds = [103, 133, 123, 105, 233]
+	#seeds = [111, 199, 188, 234, 236]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
-		test_gibbs_cov(y, x_true, 10000, 5000, 1)
+		test_gibbs_diag(y, x_true, 20000, 10000, 1)
 		println()
-		test_gibbs_diag(y, x_true, 10000, 5000, 1) # Debug: to investigate
+		test_gibbs_cov(y, x_true, 20000, 10000, 1)
+		println()
 	end
 end
 
 #test_gibbs()
 
 function com_vb_gibbs()
-	#seeds = [108, 134, 123, 105, 233]
-	seeds = [111, 199, 188, 234, 236]
+	seeds = [108, 134, 123, 105, 233]
+	#seeds = [111, 199, 188, 234, 236]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
-		test_gibbs_cov(y, x_true, 20000, 10000, 1)
+		test_gibbs_cov(y, x_true, 60000, 10000, 3)
 		println()
 		test_vb(y, x_true)
 	end
