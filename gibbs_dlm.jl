@@ -120,8 +120,12 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	R⁻¹ = rand(Wishart(v_0, inv(S_0)))
 	R = inv(R⁻¹)
 
-	# DEBUG: hyper-prior [Pathological Gamma(0.01, 0.01)], (0.1, 0.1)?
-	α, β = 100, 100
+	# DEBUG: hyper-prior [Pathological Gamma(0.01, 0.01)]
+	"""
+	α <= 1 the mode is at 0, otherwise the mode is away from 0
+	when β (rate, inverse-scale) decreases, horizontal scale decreases, squeeze left and up
+	"""
+	α, β = 10, 10
 	ρ_q = rand(Gamma(α, β), K)
     Q = Diagonal(1 ./ ρ_q)
 	
@@ -522,7 +526,6 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
 	
-	
 	for i in 1:max_iter
 		E_R_inv, E_Q_inv, Q_gam = vb_m_diag(y, hss, prior, A, C)
 		hss, μ_s0, Σ_s0, log_Z = vb_e_diag(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
@@ -656,7 +659,10 @@ function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
 	D, _ = size(y)
-	prior = HPP_D(100, 100, 100, 100, zeros(K), Matrix{Float64}(I, K, K))
+
+	# DEBUG, slightly different choice of prior
+	prior = HPP_D(10, 10, 10, 10, zeros(K), Matrix{Float64}(I, K, K))
+
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC Diagonal Covariances ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_diag(y, A, C, prior, mcmc, burn_in, thin)
@@ -684,7 +690,7 @@ function test_vb(y, x_true)
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-	println("\n--- VB with Diagonal Covariances ---")
+	println("--- VB with Diagonal Covariances ---")
 
 	for t in [false, true]
 		println("\nHyperparam optimisation: $t")
@@ -720,6 +726,7 @@ function test_vb(y, x_true)
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
     μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
 	println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+	println()
 end
 
 function test_gibbs_cov(y, x_true, mcmc=10000, burn_in=5000, thin=1)
@@ -798,8 +805,8 @@ end
 #test_gibbs()
 
 function com_vb_gibbs()
-	seeds = [108, 134, 123, 105, 233]
-	#188, 199, 233, 234, 236
+	#seeds = [108, 134, 123, 105, 233]
+	seeds = [111, 199, 188, 234, 236]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
@@ -815,7 +822,8 @@ function out_txt()
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				com_vb_gibbs()
+				#com_vb_gibbs()
+				test_gibbs()
 			end	
 		end
 	end

@@ -12,6 +12,7 @@ begin
 	using StatsBase
 	using Dates
 	using DataFrames
+	using StateSpaceModels
 end
 
 function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
@@ -245,19 +246,19 @@ function sample_Q(Xs, A, α_q, β_q)
     return diagm(1 ./ q_sampled)
 end
 
-function test_Gibbs_RQ()
+function test_Gibbs_RQ(rnd)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.05, 0.03])
+	Q_lg = Diagonal([1.0, 0.3])
 	R_lg = [0.1]
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(111)
-	T = 500
+	Random.seed!(rnd)
+	T = 1000
 	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
-	println("y", size(y))
-	println("x", size(x_true))
-	prior = Q_Gamma(0.01, 0.01, 0.01, 0.01)
+	#println("y", size(y))
+	#println("x", size(x_true))
+	prior = Q_Gamma(10, 10, 10, 10)
 
 	R = sample_R(x_true, y, C_lg, prior.a, prior.b)
 	println("R", R)
@@ -265,8 +266,6 @@ function test_Gibbs_RQ()
 	Q = sample_Q(x_true, A_lg, prior.α, prior.β)
 	println("Q", Q)
 end
-
-#test_Gibbs_RQ()
 
 function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
 	_, T = size(Ys)
@@ -323,16 +322,15 @@ function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
 	return X, x_0
 end
 
-function test_ffbs_x()
+function test_ffbs_x(rnd, max_T = 500)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.5, 0.3])
+	Q_lg = Diagonal([0.3, 0.3])
 	R_lg = [0.1]
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(111)
-	T = 500
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
+	Random.seed!(rnd)
+	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, max_T)
 
 	xs, _ = ffbs_x(y, A_lg, C_lg, R_lg, Q_lg, μ_0, Σ_0)
 	println("MSE, MAD: ", error_metrics(x_true, xs))
@@ -389,8 +387,9 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
 
-	# Debug: different hyper-parameter usages 
+	# Debug: different hyper-parameter usages [scale param should be large to be flat prior]
 	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+	
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin, debug)
@@ -412,8 +411,7 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	xs_std = std(Xs_samples, dims=1)[1, :, :]
 	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 
-	#println("size of xs_mean, xs_std: ", size(xs_m), size(xs_std))
-	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+	println("size of xs_mean, xs_std: ", size(xs_m), size(xs_std))
 end
 
 #test_gibbs(103)
@@ -423,7 +421,7 @@ function test_vb(y, x_true)
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-	println("\n--- VBEM ---")
+	println("--- VBEM ---")
 
 	for t in [false, true]
 		println("\nHyper-param optimisation: $t")
@@ -461,16 +459,36 @@ end
 function main()
 	println("Running experiments for linear growth model:\n")
 
-	seeds = [103, 133, 100, 143, 111]
-	#seeds = [88, 145, 100, 104, 134]
+	#seeds = [103, 133, 100, 143, 111]
+	seeds = [88, 145, 100, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		y, x_true = gen_test_data(sd)
 		test_gibbs(y, x_true, 60000, 5000, 3)
 		println()
-		test_vb(y, x_true)
+		#test_vb(y, x_true)
+		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
+end
+
+function comp_vb_mle(y, x_true)
+	mle_lg = LocalLinearTrend(vec(y))
+	StateSpaceModels.fit!(mle_lg)
+	print_results(mle_lg)
+
+	fm = get_filtered_state(mle_lg)
+
+	filter_err = error_metrics(x_true, fm')
+
+	sm = get_smoothed_state(mle_lg)
+	smooth_err = error_metrics(x_true, sm')
+
+	println("\nMLE Filtered MSE, MAD: ", filter_err)
+	println("MLE Smoother MSE, MAD: ", smooth_err)
+
+	println()
+	test_vb(y, x_true)
 end
 
 #main()
