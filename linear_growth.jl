@@ -466,7 +466,7 @@ function main()
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		y, x_true = gen_test_data(sd)
-		test_gibbs(y, x_true, 20000, 10000, 1)
+		test_gibbs(y, x_true, 60000, 5000, 3)
 		println()
 		test_vb(y, x_true)
 		println("----- END Run seed: $sd -----\n")
