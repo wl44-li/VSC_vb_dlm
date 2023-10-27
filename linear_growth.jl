@@ -411,10 +411,16 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	xs_std = std(Xs_samples, dims=1)[1, :, :]
 	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 
-	println("size of xs_mean, xs_std: ", size(xs_m), size(xs_std))
+	ps = plot_x_itvl(xs_m, xs_std, x_true)
+
+	for i in 1:K
+		p = ps[i]
+		title!("MCMC inference x_[$i, :]")
+		display(p)
+		sleep(1)
+	end
 end
 
-#test_gibbs(103)
 
 function test_vb(y, x_true)
 	A_lg = [1.0 1.0; 0.0 1.0]
@@ -430,16 +436,17 @@ function test_vb(y, x_true)
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
-		μs_s, _, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
+		μs_s, Σ_s, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
 		println("\nVB q(R):")
 		show(stdout, "text/plain", R)
 		println("\n\nVB q(Q):")
 		show(stdout, "text/plain", Q)
 		println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
 
-		#println("size of μs_s: ", size(μs_s))
-
-		sleep(1)
+		#TO-DO: q(x) is MVN, where mean is μs_s and co-variance is Σ_s
+		# research a way to plot such MVN by each mean element?
+		println("\nmean_x_1 : ", μs_s[:, 1])
+		println("Co-variances_x_1 : ", Σ_s[:, :, 1])
 	end
 end
 
@@ -459,8 +466,9 @@ end
 function main()
 	println("Running experiments for linear growth model:\n")
 
+	seeds = [133]
 	#seeds = [103, 133, 100, 143, 111]
-	seeds = [88, 145, 100, 104, 134]
+	#seeds = [88, 145, 100, 104, 134]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		y, x_true = gen_test_data(sd)
@@ -491,7 +499,7 @@ function comp_vb_mle(y, x_true)
 	test_vb(y, x_true)
 end
 
-#main()
+main()
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -505,7 +513,7 @@ function out_txt()
 	end
 end
 
-out_txt()
+#out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

@@ -225,3 +225,36 @@ function plot_latent(x_true, x_inf, max_T = 50)
 
     return p
 end
+
+function plot_x_itvl(means, stds, x_true = nothing, n = 30)
+    # Ensure that n is within bounds
+    n = min(n, size(means, 2))
+    
+    # Get the number of dimensions
+    dims = size(means, 1)
+    
+    # Preallocate an array to hold the plots
+    plots = Vector{Any}(undef, dims)
+    
+    for dim in 1:dims
+        # Get the data for this dimension
+        μ = means[dim, 1:n]
+        σ = stds[dim, 1:n]
+        t = 1:n
+        
+        # Create a new plot for this dimension
+        p = plot(t, μ, ribbon=σ, fillalpha=0.3, 
+                 label="prediction interval", linewidth=2, 
+                 title="Dimension $dim")
+        
+        # If x_true is provided, plot the ground-truth
+        if x_true !== nothing
+            plot!(p, t, x_true[dim, 1:n], label="Ground_truth x_$dim", color=:red)
+        end
+        
+        # Assign the plot to the plots array
+        plots[dim] = p
+    end
+    
+    return plots
+end

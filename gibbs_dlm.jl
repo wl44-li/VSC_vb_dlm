@@ -786,9 +786,12 @@ function test_ffbs()
 
 	X = X[:, 2:end]
 	println("MSE, MAD of FFBS: ", error_metrics(x_true, X))
-	plot_latent(x_true', X')
 end
 
+"""
+To-Do:
+- graphical comparison
+"""
 #test_ffbs()
 
 function test_gibbs()
