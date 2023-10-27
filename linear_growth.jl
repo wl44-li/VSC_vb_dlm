@@ -388,7 +388,7 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	K = size(A_lg, 1)
 
 	# Debug: different hyper-parameter usages [scale param should be large to be flat prior]
-	prior = HPP_D(0.01, 0.01, 10, 10, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
 	
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
@@ -443,10 +443,10 @@ function test_vb(y, x_true)
 	end
 end
 
-function gen_test_data(rnd, max_T = 500)
+function gen_test_data(rnd, max_T = 1000)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q = Diagonal([0.5, 0.5])
+	Q = Diagonal([1.0, 1.0])
 	R = [0.1]
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
@@ -464,9 +464,10 @@ function main()
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		y, x_true = gen_test_data(sd)
-		test_gibbs(y, x_true, 10000, 10000, 1)
-		
-		#comp_vb_mle(y, x_true)
+		test_gibbs(y, x_true, 60000, 5000, 3)
+		println()
+		#test_vb(y, x_true)
+		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
@@ -490,7 +491,7 @@ function comp_vb_mle(y, x_true)
 	test_vb(y, x_true)
 end
 
-main()
+#main()
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -504,7 +505,7 @@ function out_txt()
 	end
 end
 
-#out_txt()
+out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
