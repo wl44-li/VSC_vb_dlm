@@ -480,7 +480,7 @@ function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
 	return p
 end
 
-function test_vb_ll(y, x_true, show_plot = false)
+function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	model = LocalLevel(y)
 	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
 	print_results(model)
@@ -495,51 +495,35 @@ function test_vb_ll(y, x_true, show_plot = false)
 	println("MLE Smoother MSE, MAD: ", smooth_err)
 	
 	hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
-
-	x_ht = missing
-	x_hf = missing
-	std_ht = missing
-	std_hf = missing
-
 	println("\n--- VBEM ---")
-	for t in [false, true]
-		println("\nHyperparam optimisation: $t")
-		@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, t)
+	println("\nHyperparam optimisation: $hyperoptim")
+	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim)
 
-		if show_plot
-			p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
-			display(p)
-		end
+	if show_plot
+		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		display(p)
+	end
 
-		μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
-    	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
+	μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
+	x_std = sqrt.(σs_s)
+
+	println("\nVB q(r) mode: ", r)
+	println("VB q(q) mode: ", q)
+	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+
+	if show_plot
+		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
+		title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
+		display(x_plot)
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		plot_rq_CI(q_rq)
 		sleep(1)
-
-		if t == true
-			x_ht = μs_s
-			std_ht = sqrt.(σs_s)
-		else
-			x_hf = μs_s
-			std_hf = sqrt.(σs_s)
-		end
-
-		println("\nVB q(r) mode: ", r)
-		println("VB q(q) mode: ", q)
-		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
-	
-		if show_plot
-			x_plot = plot_CI_ll(μs_s, σs_s, x_true)
-			title!("Local Level x 95% CI, Hyper-param update: $t")
-			display(x_plot)
-			#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-			#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-			plot_rq_CI(q_rq)
-			sleep(1)
-		end
 	end
 
 	# to compare with MCMC
-	return x_ht, std_ht, x_hf, std_hf
+	return μs_s, x_std
 end
 
 function main(max_T)
@@ -549,17 +533,20 @@ function main(max_T)
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
+	seeds = [103]
 	#seeds = [88, 145, 105, 104, 134]
-	seeds = [103, 133, 100, 143, 111]
+	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-		mcmc_x_m, mcmc_x_std = test_gibbs_ll(y, x_true, 60000, 10000, 3)
+		mcmc_x_m, mcmc_x_std = test_gibbs_ll(y, x_true, 20000, 10000, 1)
 		println()
-		vb_x_m, vb_x_std, _, _, = test_vb_ll(y, x_true)
+		vb_x_m, vb_x_std = test_vb_ll(y, x_true)
 
-		p = compare_mcmc_vi(mcmc_x_m, vb_x_m, mcmc_x_std, vb_x_std)
+		#p = compare_mcmc_vi(mcmc_x_m, vb_x_m, mcmc_x_std, vb_x_std)
+		p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
+		title!(p, "Seed: $sd")
 		display(p)
 		println("----- END Run seed: $sd -----\n")
 	end
@@ -569,11 +556,11 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}, mcmc_std::Vector{T}, vi
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) == length(mcmc_std) == length(vi_std) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, ribbon=(mcmc_std), 
-	label="MCMC", color=:blue, alpha=0.6)
+	p_mcmc = scatter(mcmc, vi, ribbon=(mcmc_std, zeros(T, length(mcmc_std))), 
+	label="MCMC", color=:yellow, alpha=0.3)
 
-	p_vi = scatter!(p_mcmc, mcmc, vi, ribbon=(vi_std), 
-	label="VI", color=:green, alpha=0.3)
+	p_vi = scatter!(p_mcmc, mcmc, vi, ribbon=(zeros(T, length(vi_std)), vi_std), 
+	label="VI", color=:blue, alpha=0.3)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
@@ -582,22 +569,11 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}, mcmc_std::Vector{T}, vi
 	# Plot the y=x line
 	plot!(p_vi, [min_val, max_val], [min_val, max_val], label="y=x", linestyle=:dash, color=:red, linewidth=2)
 
-	# Create a scatter plot of VI vs MCMC with variances as ribbons
-	# p = scatter(mcmc, vi, ribbon=(mcmc_std, vi_std), label="Data Points",
-	# xlabel="MCMC", ylabel="VI",
-	# title="Comparison of MCMC and VI", alpha=0.6)
-
-	# Determine the range for the y=x line
-	# min_val = min(minimum(mcmc), minimum(vi))
-	# max_val = max(maximum(mcmc), maximum(vi))
-
-	# # Plot the y=x line
-	# plot!(p, [min_val, max_val], [min_val, max_val], label="y=x", linestyle=:dash, color=:red, linewidth=2)
-
 	return p_vi
 end
 
 main(500)
+
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 

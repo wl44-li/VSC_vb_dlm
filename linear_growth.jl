@@ -421,44 +421,47 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 			sleep(1)
 		end
 	end
+	return xs_m, xs_std
 end
 
-
-function test_vb(y, x_true, show_plot = false)
+function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
 	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
 	println("--- VBEM ---")
 
-	for t in [false, true]
-		println("\nHyper-param optimisation: $t")
-		@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, t)
-		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
-		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-		μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
-		μs_s, Σ_s, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
-		println("\nVB q(R):")
-		show(stdout, "text/plain", R)
-		println("\n\nVB q(Q):")
-		show(stdout, "text/plain", Q)
-		println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+	println("\nHyper-param optimisation: $hyperoptim")
+	@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim)
 
-		if show_plot
-			vars = hcat([diag(Σ_s[:, :, t]) for t in 1:size(y, 2)]...)
-			stds = sqrt.(vars)
-			plots = plot_x_itvl(μs_s, stds, x_true, 20)
-			for i in 1:K
-				p = plots[i]
-				title!(p, "VB, hyper-param optim:$t")
-				sleep(1)
-				display(p)
-				sleep(1)
-			end
+	μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
+	μs_s, Σ_s, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
+	
+	println("\nVB q(R):")
+	show(stdout, "text/plain", R)
+	println("\n\nVB q(Q):")
+	show(stdout, "text/plain", Q)
+	println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+
+	vars = hcat([diag(Σ_s[:, :, t]) for t in 1:size(y, 2)]...)
+	stds = sqrt.(vars)
+
+	if show_plot
+		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		display(p)
+		sleep(1)
+
+		plots = plot_x_itvl(μs_s, stds, x_true, 20)
+		for i in 1:K
+			pl = plots[i]
+			title!(pl, "VB, hyper-param optim:$t")
+			display(pl)
+			sleep(1)
 		end
 	end
-
+	return μs_s, stds
 end
 
 function gen_test_data(rnd, max_T=100)
@@ -477,16 +480,29 @@ end
 function main(n)
 	println("Running experiments for linear growth model:\n")
 	println("T = $n\n")
-	seeds = [103, 133, 123, 143, 111]
+	seeds = [103]
+	#seeds = [103, 133, 123, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		y, x_true = gen_test_data(sd, n)
-		test_gibbs(y, x_true, 60000, 5000, 3)
+		xm_mcmc, std_mcmc = test_gibbs(y, x_true, 60000, 5000, 3)
 		println()
-		comp_vb_mle(y, x_true)
+		#comp_vb_mle(y, x_true)
+		xm_vb, std_vb = test_vb(y, x_true)
+
+		p = qqplot(xm_mcmc[1, :], xm_vb[1, :], qqline = :R)
+		title!(p, "Seed: $sd, x_dim: 1")
+		display(p)
+
+		p2 = qqplot(xm_mcmc[2, :], xm_vb[2, :], qqline = :R)
+		title!(p2, "Seed: $sd, x_dim: 2")
+		display(p2)
+
 		println("----- END Run seed: $sd -----\n")
 	end
 end
+
+main(1000)
 
 function comp_vb_mle(y, x_true)
 	mle_lg = LocalLinearTrend(vec(y))
@@ -518,7 +534,7 @@ function out_txt()
 	end
 end
 
-out_txt()
+#out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
