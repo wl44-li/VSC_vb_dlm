@@ -100,7 +100,7 @@ function update_hyp_D(hpp::HPP_D, Q_gam::Q_Gamma)
     # Update using fixed point equations
 	a = hpp.a		
 	α = hpp.α
-    for _ in 1:100
+    for _ in 1:10
         ψ_a = digamma(a)
         ψ_a_p = trigamma(a)
         
@@ -124,7 +124,7 @@ function update_hyp_D(hpp::HPP_D, Q_gam::Q_Gamma)
     d_ = mean(exp_𝛐)
     c_ = mean(exp_log_𝛐)
 
-	for _ in 1:100
+	for _ in 1:10
         ψ_α = digamma(α)
         ψ_α_p = trigamma(α)
         
@@ -226,6 +226,7 @@ function plot_latent(x_true, x_inf, max_T = 50)
     return p
 end
 
+
 function plot_x_itvl(means, stds, x_true = nothing, n = 30)
     # Ensure that n is within bounds
     n = min(n, size(means, 2))
@@ -243,9 +244,8 @@ function plot_x_itvl(means, stds, x_true = nothing, n = 30)
         t = 1:n
         
         # Create a new plot for this dimension
-        p = plot(t, μ, ribbon=σ, fillalpha=0.3, 
-                 label="prediction interval", linewidth=2, 
-                 title="Dimension $dim")
+        p = plot(t, μ, ribbon=1.96*σ, fillalpha=0.3, 
+                 label="95% prediction interval", linewidth=2)
         
         # If x_true is provided, plot the ground-truth
         if x_true !== nothing

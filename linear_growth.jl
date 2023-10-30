@@ -94,6 +94,7 @@ function backward_(μ_f::Array{Float64, 2}, Σ_f::Array{Float64, 3}, A::Array{Fl
 
 		Σ_s_cross[:, :, t+1] = J_t * Σ_s[:, :, t+1]
     end
+
 	Σ_s_cross[:, :, 1] = inv(I + A'*A) * A' * Σ_s[:, :, 1]
 
 	J_0 = prior.Σ_0 * A' / (A * prior.Σ_0 * A' + E_Q)
@@ -336,7 +337,7 @@ function test_ffbs_x(rnd, max_T = 500)
 	println("MSE, MAD: ", error_metrics(x_true, xs))
 end
 
-function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug = false)
+function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
@@ -382,7 +383,7 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
+function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
@@ -392,7 +393,7 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin, debug)
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin)
 	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---\n")
 	Q_chain = Chains(reshape(Qs_samples, n_samples, 4))
 	R_chain = Chains(reshape(Rs_samples, n_samples, 1))
@@ -411,22 +412,23 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, debug = false)
 	xs_std = std(Xs_samples, dims=1)[1, :, :]
 	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 
-	ps = plot_x_itvl(xs_m, xs_std, x_true)
-
-	for i in 1:K
-		p = ps[i]
-		title!("MCMC inference x_[$i, :]")
-		display(p)
-		sleep(1)
+	if show_plot
+		ps = plot_x_itvl(xs_m, xs_std, x_true, 20)
+		for i in 1:K
+			p = ps[i]
+			title!(p, "MCMC latent x inference")
+			display(p)
+			sleep(1)
+		end
 	end
 end
 
 
-function test_vb(y, x_true)
+function test_vb(y, x_true, show_plot = false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
 	println("--- VBEM ---")
 
 	for t in [false, true]
@@ -443,14 +445,23 @@ function test_vb(y, x_true)
 		show(stdout, "text/plain", Q)
 		println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
 
-		#TO-DO: q(x) is MVN, where mean is μs_s and co-variance is Σ_s
-		# research a way to plot such MVN by each mean element?
-		println("\nmean_x_1 : ", μs_s[:, 1])
-		println("Co-variances_x_1 : ", Σ_s[:, :, 1])
+		if show_plot
+			vars = hcat([diag(Σ_s[:, :, t]) for t in 1:size(y, 2)]...)
+			stds = sqrt.(vars)
+			plots = plot_x_itvl(μs_s, stds, x_true, 20)
+			for i in 1:K
+				p = plots[i]
+				title!(p, "VB, hyper-param optim:$t")
+				sleep(1)
+				display(p)
+				sleep(1)
+			end
+		end
 	end
+
 end
 
-function gen_test_data(rnd, max_T = 1000)
+function gen_test_data(rnd, max_T=100)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q = Diagonal([1.0, 1.0])
@@ -463,18 +474,15 @@ function gen_test_data(rnd, max_T = 1000)
 	return y, x_true
 end
 
-function main()
+function main(n)
 	println("Running experiments for linear growth model:\n")
-
-	seeds = [133]
-	#seeds = [103, 133, 100, 143, 111]
-	#seeds = [88, 145, 100, 104, 134]
+	println("T = $n\n")
+	seeds = [103, 133, 123, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		y, x_true = gen_test_data(sd)
+		y, x_true = gen_test_data(sd, n)
 		test_gibbs(y, x_true, 60000, 5000, 3)
 		println()
-		#test_vb(y, x_true)
 		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
@@ -486,7 +494,6 @@ function comp_vb_mle(y, x_true)
 	print_results(mle_lg)
 
 	fm = get_filtered_state(mle_lg)
-
 	filter_err = error_metrics(x_true, fm')
 
 	sm = get_smoothed_state(mle_lg)
@@ -499,21 +506,19 @@ function comp_vb_mle(y, x_true)
 	test_vb(y, x_true)
 end
 
-main()
-
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				main()
+				main(500)
 			end
 		end
 	end
 end
 
-#out_txt()
+out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
