@@ -764,7 +764,7 @@ function test_data(rnd, max_T = 500)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	Q = Diagonal([1.0, 1.0]) # Diagonal Q
-	R = [0.5 0.2; 0.2 0.5] # full-cov R
+	R = [0.5 0.2; 0.2 0.5] # Full-cov R
 	μ_0 = [0.0, 0.0]
 	Σ_0 = Diagonal([1.0, 1.0])
 	Random.seed!(rnd)
@@ -792,22 +792,22 @@ end
 To-Do:
 - graphical comparison
 """
-#test_ffbs()
 
 function test_gibbs()
 	seeds = [103, 133, 123, 105, 233]
 	#seeds = [111, 199, 188, 234, 236]
 	for sd in seeds
 		y, x_true = test_data(sd)
-		println("--- Seed: $sd ---")
+		println("\n----- BEGIN Run seed: $sd -----\n")
 		test_gibbs_diag(y, x_true, 20000, 10000, 1)
 		println()
 		test_gibbs_cov(y, x_true, 20000, 10000, 1)
 		println()
+		test_vb(y, x_true) # needs a quick clean-up
+		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-#test_gibbs()
 
 function com_vb_gibbs()
 	seeds = [108, 134, 123, 105, 233]

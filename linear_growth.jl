@@ -505,6 +505,7 @@ end
 main(1000)
 
 function comp_vb_mle(y, x_true)
+	println("--- MLE ---")
 	mle_lg = LocalLinearTrend(vec(y))
 	StateSpaceModels.fit!(mle_lg)
 	print_results(mle_lg)
@@ -517,7 +518,6 @@ function comp_vb_mle(y, x_true)
 
 	println("\nMLE Filtered MSE, MAD: ", filter_err)
 	println("MLE Smoother MSE, MAD: ", smooth_err)
-
 	println()
 	test_vb(y, x_true)
 end
