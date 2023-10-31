@@ -27,12 +27,12 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	Cs[:, :, 1] = C_0
 	
 	# one-step ahead latent distribution, used in backward sampling
-	as = zeros(d, T)
+	a_s = zeros(d, T)
 	Rs = zeros(d, d, T)
 
 	for t in 1:T
 		# Prediction
-		as[:, t] = a_t = A * ms[:, t]
+		a_s[:, t] = a_t = A * ms[:, t]
 		Rs[:, :, t] = R_t = A * Cs[:, :, t] * A' + Q #W
 		
 		# Update
@@ -43,11 +43,11 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 		ms[:, t+1] = a_t + R_t * C' * inv(S_t) * (Ys[:, t] - f_t)
 		Cs[:, :, t+1]= R_t - R_t * C' * inv(S_t) * C * R_t
 	end
-	return ms, Cs, as, Rs
+	return ms, Cs, a_s, Rs
 end
 
 
-function ffbs_x(Ys, A, C, R, Q, m_0, P_0)
+function ffbs_x(Ys, A, C, R, Q, m_0, P_0, n = 1)
 	d, _ = size(A)
 	_, T = size(Ys)
 
@@ -58,7 +58,7 @@ function ffbs_x(Ys, A, C, R, Q, m_0, P_0)
 	try
 		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	catch PosDefException
-		println("Pathology case encountered: ")
+		println("Pathology case encountered at iteration $n: ")
 		println("C_end: ")
 		println(Cs[:, :, end])
 		println("Y_end:")
@@ -140,9 +140,9 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	    # Update the states
 
 		if debug
-			println("MCMC full R debug, iteration: $i")
+			x = ffbs_x(y, A, C, R, Q, μ_0, λ_0, i)
 		end
-		x = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
+		x = ffbs_x(y, A, C, R, Q, μ_0, λ_0, i)
 		x = x[:, 2:end]
 
 		# Update the system noise

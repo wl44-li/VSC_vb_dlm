@@ -1,9 +1,10 @@
 include("kl_optim.jl")
 
 begin
-	using Distributions, Plots, Random
+	using Distributions, Random
 	using LinearAlgebra
 	using StatsFuns
+	using StatsPlots
 	using SpecialFunctions
 	using MultivariateStats
 end
@@ -264,7 +265,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 	return exp_np, elbo_prev
 end
 
-function main()
+function test()
 	Random.seed!(121)
 	T = 1000
 	μ_0_t = zeros(2)
@@ -280,14 +281,51 @@ function main()
 		μ_0 = zeros(k)
 		Σ_0 = Matrix{Float64}(I, k, k)
 		hpp = HPP(γ, a, b, μ_0, Σ_0)
-		_, el = vb_ppca_c(y_10, hpp, true)
+		exp_np, el = vb_ppca_c(y_10, hpp, true)
 		println("\nelbo, k=$k", el)
 
-		# TO-DO: Test restruction error
+		ωs, _, _ = v_forward(y_10, exp_np, hpp)
+		println("latent x error: ", error_metrics(x_2, ωs))
+		println()
 	end
 end
 
-main()
+test()
+
+function test_recon(max_T = 1000)
+	seeds = [103, 133, 123, 105, 233]
+
+	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2] 
+	R = Diagonal([0.5, 0.5, 0.5])
+	μ_0 = zeros(2)
+	Σ_0 = Matrix{Float64}(I, 2, 2)
+
+	for sd in seeds
+		Random.seed!(sd)
+		y, x_true = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, μ_0, Σ_0, max_T)
+
+		M_mle = MultivariateStats.fit(PPCA, y; maxoutdim=2) # default MLE
+		println("MLE W: ")
+		show(stdout, "text/plain", loadings(M_mle))
+		println("\n\n", M_mle, "\n")
+
+		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
+		println("EM W: ")
+		show(stdout, "text/plain", loadings(M_em))
+		println("\n\n", M_em, "\n")
+
+		M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
+		println("Bayes W: ")
+		show(stdout, "text/plain", loadings(M_bay))
+		println("\n\n", M_bay, "\n")
+
+		println("--- VBEM ---")
+
+	end
+
+
+end
+
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
