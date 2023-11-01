@@ -526,6 +526,24 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	return μs_s, x_std
 end
 
+function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
+    # Ensure all vectors have the same length
+    @assert length(mcmc) == length(vi) "All vectors must have the same length"
+    
+	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:yellow, alpha=0.3)
+
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:blue, alpha=0.3)
+
+	# Determine the range for the y=x line
+	min_val = min(minimum(mcmc), minimum(vi))
+	max_val = max(maximum(mcmc), maximum(vi))
+
+	# Plot the y=x line
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:red, linewidth=2)
+
+	return p_vi
+end
+
 function main(max_T)
 	println("Running experiments for local level model:\n")
 	println("T = $max_T")
@@ -533,7 +551,7 @@ function main(max_T)
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
-	seeds = [103]
+	seeds = [134]
 	#seeds = [88, 145, 105, 104, 134]
 	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
@@ -544,37 +562,24 @@ function main(max_T)
 		println()
 		vb_x_m, vb_x_std = test_vb_ll(y, x_true)
 
-		#p = compare_mcmc_vi(mcmc_x_m, vb_x_m, mcmc_x_std, vb_x_std)
-		p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
-		title!(p, "Seed: $sd")
+		p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
+		#p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
+		title!(p, "Latent X inference mean")
 		display(p)
+
+		p2 = compare_mcmc_vi(mcmc_x_std.^2, vb_x_std.^2)
+		#p2 = qqplot(mcmc_x_std.^2, vb_x_std.^2, qqline = :R)
+		title!(p2, "Latent X inference variance")
+		xlims!(p2, (0.08, 0.11))
+		ylims!(p2, (0.08, 0.11))
+		display(p2)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}, mcmc_std::Vector{T}, vi_std::Vector{T}) where T
-    # Ensure all vectors have the same length
-    @assert length(mcmc) == length(vi) == length(mcmc_std) == length(vi_std) "All vectors must have the same length"
-    
-	p_mcmc = scatter(mcmc, vi, ribbon=(mcmc_std, zeros(T, length(mcmc_std))), 
-	label="MCMC", color=:yellow, alpha=0.3)
+main(1000)
 
-	p_vi = scatter!(p_mcmc, mcmc, vi, ribbon=(zeros(T, length(vi_std)), vi_std), 
-	label="VI", color=:blue, alpha=0.3)
-
-	# Determine the range for the y=x line
-	min_val = min(minimum(mcmc), minimum(vi))
-	max_val = max(maximum(mcmc), maximum(vi))
-
-	# Plot the y=x line
-	plot!(p_vi, [min_val, max_val], [min_val, max_val], label="y=x", linestyle=:dash, color=:red, linewidth=2)
-
-	return p_vi
-end
-
-main(500)
-
-function out_txt()
+function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
 	# Open a file for writing
@@ -583,13 +588,13 @@ function out_txt()
 		redirect_stdout(f) do
 			redirect_stderr(f) do
 				# Your script code here
-				main(500)
+				main(n)
 			end
 		end
 	end
 end
 
-#out_txt()
+#out_txt(200)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

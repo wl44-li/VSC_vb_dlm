@@ -1,5 +1,4 @@
 include("kl_optim.jl")
-
 begin
 	using Distributions, Random
 	using LinearAlgebra
@@ -464,7 +463,29 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	return μs_s, stds
 end
 
-function gen_test_data(rnd, max_T=100)
+
+function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
+    # Ensure all vectors have the same length
+    @assert length(mcmc) == length(vi) "All vectors must have the same length"
+    
+	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:yellow, alpha=0.3)
+
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:blue, alpha=0.3)
+
+	# Determine the range for the y=x line
+	min_val = min(minimum(mcmc), minimum(vi))
+	max_val = max(maximum(mcmc), maximum(vi))
+
+	# Plot the y=x line
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:red, linewidth=2)
+
+	return p_vi
+end
+
+
+function main(n)
+	println("Running experiments for linear growth model:\n")
+	println("T = $n\n")
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q = Diagonal([1.0, 1.0])
@@ -472,39 +493,50 @@ function gen_test_data(rnd, max_T=100)
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
 	Σ_0 = Diagonal(ones(K))
-	Random.seed!(rnd)
-	y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
-	return y, x_true
-end
 
-function main(n)
-	println("Running experiments for linear growth model:\n")
-	println("T = $n\n")
-	seeds = [103]
+	println("Ground-truth R:")
+	show(stdout, "text/plain", R)
+	println("\nGround-truth Q:")
+	show(stdout, "text/plain", Q)
+
+	seeds = [133]
+	#seeds = [26, 236, 199, 233, 177]
 	#seeds = [103, 133, 123, 143, 111]
+
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
-		y, x_true = gen_test_data(sd, n)
-		xm_mcmc, std_mcmc = test_gibbs(y, x_true, 60000, 5000, 3)
+		Random.seed!(sd)
+		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
+		xm_mcmc, std_mcmc = test_gibbs(y, x_true, 20000, 10000, 1)
 		println()
-		#comp_vb_mle(y, x_true)
-		xm_vb, std_vb = test_vb(y, x_true)
+		xm_vb, std_vb = comp_vb_mle(y, x_true)
 
-		p = qqplot(xm_mcmc[1, :], xm_vb[1, :], qqline = :R)
-		title!(p, "Seed: $sd, x_dim: 1")
+		p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, :])
+		title!(p, "Latent x mean, x_1")
 		display(p)
 
-		p2 = qqplot(xm_mcmc[2, :], xm_vb[2, :], qqline = :R)
-		title!(p2, "Seed: $sd, x_dim: 2")
+		println(size(std_mcmc))
+		println(size(std_vb))
+
+		p_v = compare_mcmc_vi((std_mcmc.^2)[1, :], (std_vb.^2)[1, :])
+		title!(p_v, "Latent x variance, x_1")
+		display(p_v)
+
+		p2 = compare_mcmc_vi(xm_mcmc[2, :], xm_vb[2, :])
+		title!(p2, "Latent x mean, x_2")
 		display(p2)
 
+		p_2v = compare_mcmc_vi((std_mcmc.^2)[2, :], (std_vb.^2)[2, :])
+		title!(p_2v, "Latent x variance, x_2")
+		display(p_2v)
 		println("----- END Run seed: $sd -----\n")
+
 	end
 end
 
-main(1000)
+main(200)
 
-function comp_vb_mle(y, x_true)
+function comp_vb_mle(y, x_true, hyperoptim=false)
 	println("--- MLE ---")
 	mle_lg = LocalLinearTrend(vec(y))
 	StateSpaceModels.fit!(mle_lg)
@@ -519,22 +551,23 @@ function comp_vb_mle(y, x_true)
 	println("\nMLE Filtered MSE, MAD: ", filter_err)
 	println("MLE Smoother MSE, MAD: ", smooth_err)
 	println()
-	test_vb(y, x_true)
+	xm_vb, std_vb = test_vb(y, x_true, hyperoptim)
+	return xm_vb, std_vb
 end
 
-function out_txt()
+function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				main(500)
+				main(n)
 			end
 		end
 	end
 end
 
-#out_txt()
+#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

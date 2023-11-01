@@ -287,45 +287,92 @@ function test()
 		ωs, _, _ = v_forward(y_10, exp_np, hpp)
 		println("latent x error: ", error_metrics(x_2, ωs))
 		println()
+		if k == 2
+			W = exp_np.C
+			WTW = W'*W
+			C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
+			y_recon = W*inv(WTW)*C*x_2
+			println("y recon error: ", error_metrics(y_10, y_recon))
+		end
 	end
 end
 
-test()
 
-function test_recon(max_T = 1000)
-	seeds = [103, 133, 123, 105, 233]
-
+function comp_ppca(max_T = 1000)
+	println("Running experiments for PPCA")
+	println("T = $max_T")
 	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2] 
 	R = Diagonal([0.5, 0.5, 0.5])
 	μ_0 = zeros(2)
 	Σ_0 = Matrix{Float64}(I, 2, 2)
 
+	println("Ground-truth Loading Matrix W:")
+	show(stdout, "text/plain", C_)
+	println("\nGround-truth isotropic co-variance R:")
+	show(stdout, "text/plain", R)
+	seeds = [103, 133, 123, 105, 233]
+
 	for sd in seeds
 		Random.seed!(sd)
 		y, x_true = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, μ_0, Σ_0, max_T)
-
+		println("\n----- BEGIN Run seed: $sd -----")
 		M_mle = MultivariateStats.fit(PPCA, y; maxoutdim=2) # default MLE
-		println("MLE W: ")
+		println("\n--- MLE ---\n Loading Matrix W:")
 		show(stdout, "text/plain", loadings(M_mle))
-		println("\n\n", M_mle, "\n")
+		println("\n\n", M_mle)
+		mle_x_pred = MultivariateStats.predict(M_mle, y)
+		println("latent x error: ", error_metrics(x_true, mle_x_pred))
+		mle_y_recon = MultivariateStats.reconstruct(M_mle, x_true)
+		println("reconstruction y error: ", error_metrics(y, mle_y_recon))
 
 		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
-		println("EM W: ")
+		println("\n--- EM ---\n Loading Matrix W:")
 		show(stdout, "text/plain", loadings(M_em))
-		println("\n\n", M_em, "\n")
+		println("\n\n", M_em)
+		em_x_pred = MultivariateStats.predict(M_em, y)
+		println("latent x error: ", error_metrics(x_true, em_x_pred))
+		em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
+		println("reconstruction y error: ", error_metrics(y, em_y_recon))
 
 		M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
-		println("Bayes W: ")
+		println("\n--- Bayes ---\n Loading Matrix W:")
 		show(stdout, "text/plain", loadings(M_bay))
-		println("\n\n", M_bay, "\n")
+		println("\n\n", M_bay)
+		bay_x_pred = MultivariateStats.predict(M_bay, y)
+		println("latent x error: ", error_metrics(x_true, bay_x_pred))
+		bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
+		println("reconstruction y error: ", error_metrics(y, bay_y_recon))
 
-		println("--- VBEM ---")
-
+		hpp = HPP(ones(2), 0.1, 0.1, μ_0, Σ_0)
+		println("\n--- VBEM ---\n Loading Matrix W:")
+		exp_np, _ = vb_ppca_c(y, hpp, true)
+		show(stdout, "text/plain", exp_np.C)
+		println("\nIsotropic Co-variance R: ")
+		show(stdout, "text/plain", inv(exp_np.R⁻¹))
+		ωs, _, _ = v_forward(y, exp_np, hpp)
+		println("\nlatent x error: ", error_metrics(x_true, ωs))
+		W = exp_np.C
+		WTW = W'*W
+		C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
+		y_recon = W*inv(WTW)*C*x_true
+		println("y recon error: ", error_metrics(y, y_recon))
+		println("----- END Run seed: $sd -----\n")
 	end
-
-
 end
 
+function out_txt(n)
+	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
+
+	open(file_name, "w") do f
+		redirect_stdout(f) do
+			redirect_stderr(f) do
+				comp_ppca(n)
+			end
+		end
+	end
+end
+
+out_txt(1000)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
