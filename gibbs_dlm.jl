@@ -163,13 +163,13 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	return samples_X, samples_Q, samples_R
 end
 
-# VBEM for general Q, R
+# VBEM for general R, diagonal Q
 begin
 	struct Prior
 	    ν_R::Float64
 	    W_R::Array{Float64, 2}
-	    ν_Q::Float64
-	    W_Q::Array{Float64, 2}
+	    a::Float64
+	   	b::Float64
 	    μ_0::Array{Float64, 1}
 	    Λ_0::Array{Float64, 2}
 	end
@@ -177,25 +177,28 @@ begin
 	struct Q_Wishart
 		ν_R_q
 		W_R_q
-		ν_Q_q
-		W_Q_q
+		a_q
+		b_q
 	end
 end
 
 function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float64, 2}, C::Array{Float64, 2})
     _, T = size(y)
-    
+    K = size(A, 2) 
     # Compute the new parameters for the variational posterior of Λ_R
     ν_Rn = prior.ν_R + T
 	W_Rn_inv = inv(prior.W_R) + y*y' - hss.S_C * C' - C * hss.S_C' + C * hss.W_C * C'
     
     # Compute the new parameters for the variational posterior of Λ_Q
-    ν_Qn = prior.ν_Q + T
-	W_Qn_inv = inv(prior.W_Q) + hss.W_C - hss.S_A * A' - A * hss.S_A' + A * hss.W_A * A'
+    H = hss.W_C - hss.S_A * A' - A * hss.S_A' + A * hss.W_A * A'
+	a_ = prior.a + 0.5 * T
+	a_s = a_ * ones(K)
+    b_s = [prior.b + 0.5 * H[i, i] for i in 1:K]
+	q_𝛐 = Gamma.(a_s, 1 ./ b_s)	
+	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 
 	# Return expectations for E-step, Eq[R], E_q[Q], co-variance matrices
-	return W_Rn_inv ./ ν_Rn, W_Qn_inv ./ ν_Qn, Q_Wishart(ν_Rn, inv(W_Rn_inv), ν_Qn, inv(W_Qn_inv))
-	#return ν_Rn .* inv(W_Rn_inv), ν_Qn .* inv(W_Qn_inv) # precision matrices
+	return W_Rn_inv ./ ν_Rn, Exp_Q⁻¹, Q_Wishart(ν_Rn, inv(W_Rn_inv), a_, b_s)
 end
 
 function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior::Prior)
@@ -359,16 +362,19 @@ end
 # With Convergence Check
 function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=5e-3)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
+	K = size(A, 2)
 	E_R, E_Q  = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
+
 	for i in 1:max_iter
 		E_R, E_Q, Q_Wi = vb_m_step(y, hss, prior, A, C)
 				
 		hss, log_Z = vb_e_step(y, A, C, E_R, E_Q, prior)
 
-		kl_Wi = kl_Wishart(Q_Wi.ν_R_q, Q_Wi.W_R_q, prior.ν_R, prior.W_R) + kl_Wishart(Q_Wi.ν_Q_q, Q_Wi.W_Q_q, prior.ν_Q, prior.W_Q)
-		elbo = log_Z - kl_Wi
+		kl_Wi = kl_Wishart(Q_Wi.ν_R_q, Q_Wi.W_R_q, prior.ν_R, prior.W_R)
+		kl_gam = sum([kl_gamma(prior.a, prior.b, Q_Wi.a_q, (Q_Wi.b_q)[s]) for s in 1:K])
+		elbo = log_Z - kl_Wi - kl_gam
 		el_s[i] = elbo
 		
 		if abs(elbo - elbo_prev) < tol
@@ -686,44 +692,49 @@ function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 end
 
-function test_vb(y, x_true)
+function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
 	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
 	println("--- VB with Diagonal Covariances ---")
 
-	for t in [false, true]
-		println("\nHyperparam optimisation: $t")
-		@time R, Q, elbos = vbem_c_diag(y, A, C, prior, t)
-		#p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $t")
-		#display(p)
-		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-		println("VB q(R): ")
-		show(stdout, "text/plain", R)
-		println("\n\n VB q(Q): ")
-		show(stdout, "text/plain", Q)
-		μs_f, σs_f2 = forward_v(y, A, C, R, Q, prior)
-		μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
-		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
-		sleep(1)
+	println("\nHyperparam optimisation: $hyperoptim")
+	@time R, Q, elbos = vbem_c_diag(y, A, C, prior, hyperoptim)
+
+	if show_plot
+		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		display(p)
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
+	println("VB q(R): ")
+	show(stdout, "text/plain", R)
+	println("\n\n VB q(Q): ")
+	show(stdout, "text/plain", Q)
+	μs_f, σs_f2 = forward_v(y, A, C, R, Q, prior)
+	μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
+	println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+	sleep(1)
+
 	D, _ = size(y)
-	W_Q = Matrix{Float64}(I, K, K)
 	W_R = Matrix{Float64}(I, D, D)
-	prior = Prior(D + 1.0, W_R, K + 1.0, W_Q, zeros(K), Matrix{Float64}(I, K, K))
-	println("\n--- VB with Full Co-variances ---")
+	prior = Prior(D + 1.0, W_R, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+	println("\n--- VB with Full Co-variances R ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
 	println("VB q(R): ")
 	show(stdout, "text/plain", R)
 	println("\n\nVB q(Q): ")
 	show(stdout, "text/plain", Q)
-	#p = plot(elbos, label = "elbo", title = "ElBO progression, seed = $rnd")
-	#display(p)
-	#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-	#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+
+	if show_plot
+		p = plot(elbos, label = "elbo", title = "ElBO progression, full R")
+		display(p)
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+	end
+
 	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
     μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
 	println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
@@ -788,10 +799,6 @@ function test_ffbs()
 	println("MSE, MAD of FFBS: ", error_metrics(x_true, X))
 end
 
-"""
-To-Do:
-- graphical comparison
-"""
 
 function test_gibbs()
 	seeds = [103, 133, 123, 105, 233]
@@ -816,7 +823,7 @@ function com_vb_gibbs()
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
 		test_gibbs_cov(y, x_true, 60000, 10000, 3)
-		println()
+		# println()
 		test_vb(y, x_true)
 	end
 end
@@ -827,8 +834,8 @@ function out_txt()
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				#com_vb_gibbs()
-				test_gibbs()
+				com_vb_gibbs()
+				#test_gibbs()
 			end	
 		end
 	end
