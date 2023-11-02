@@ -183,7 +183,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	E_R_inv, E_Q_inv = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
-	
+	Q_gam = missing
 	for i in 1:max_iter
 		E_R_inv, E_Q_inv, Q_gam = vb_m_step(y, hss, prior, A, C)
 		hss, μ_s0, Σ_s0, log_Z = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
@@ -214,7 +214,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 		end
 	end
 	
-	return inv(E_R_inv), inv(E_Q_inv), el_s
+	return inv(E_R_inv), inv(E_Q_inv), el_s, Q_gam
 end
 
 # MCMC (gibbs sampling) 
@@ -412,13 +412,36 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 
 	if show_plot
+		R_chain = Chains(reshape(1 ./ Rs_samples, n_samples, 1))
+		p_r = density(R_chain)
+		title!(p_r, "MCMC Λ_R")
+		#display(p_r)
+
+		p_r_his = histogram(R_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Λ_R")
+		#display(p_r_his)
+
+		Q_chain = Chains(reshape(1 ./ Qs_samples, n_samples, 4))
+		p1 = density(Q_chain[:, 1, :], label="MCMC Λ_Q[1, 1]")
+		#display(p1)
+
+		p1_his = histogram(Q_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Λ_Q[1, 1]")
+		#display(p1_his)
+
+		p4 = density(Q_chain[:, end, :], label="MCMC Λ_Q[2, 2]")
+		#display(p4)
+
+		p4_his = histogram(Q_chain[:, end, :], bins=200, normalize=:pdf, label="MCMC Λ_Q[2, 2]")
+		#display(p4_his)
+
 		ps = plot_x_itvl(xs_m, xs_std, x_true, 20)
 		for i in 1:K
 			p = ps[i]
 			title!(p, "MCMC latent x inference")
-			display(p)
+			#display(p)
 			sleep(1)
 		end
+
+		return xs_m, xs_std, p_r_his, p1_his, p4_his
 	end
 	return xs_m, xs_std
 end
@@ -431,7 +454,7 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	println("--- VBEM ---")
 
 	println("\nHyper-param optimisation: $hyperoptim")
-	@time R, Q, elbos = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim)
+	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim)
 
 	μs_f, σs_f2 = forward_(y, A_lg, C_lg, R, Q, prior)
 	μs_s, Σ_s, _ = backward_(μs_f, σs_f2, A_lg, Q, prior)
@@ -460,7 +483,7 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 			sleep(1)
 		end
 	end
-	return μs_s, stds
+	return μs_s, stds, Q_gam
 end
 
 
@@ -499,42 +522,87 @@ function main(n)
 	println("\nGround-truth Q:")
 	show(stdout, "text/plain", Q)
 
-	seeds = [133]
-	#seeds = [26, 236, 199, 233, 177]
+	seeds = [26, 236, 199, 233, 177]
 	#seeds = [103, 133, 123, 143, 111]
 
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
-		xm_mcmc, std_mcmc = test_gibbs(y, x_true, 20000, 10000, 1)
+		test_gibbs(y, x_true, 20000, 10000, 1)
 		println()
-		xm_vb, std_vb = comp_vb_mle(y, x_true)
-
-		p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, :])
-		title!(p, "Latent x mean, x_1")
-		display(p)
-
-		println(size(std_mcmc))
-		println(size(std_vb))
-
-		p_v = compare_mcmc_vi((std_mcmc.^2)[1, :], (std_vb.^2)[1, :])
-		title!(p_v, "Latent x variance, x_1")
-		display(p_v)
-
-		p2 = compare_mcmc_vi(xm_mcmc[2, :], xm_vb[2, :])
-		title!(p2, "Latent x mean, x_2")
-		display(p2)
-
-		p_2v = compare_mcmc_vi((std_mcmc.^2)[2, :], (std_vb.^2)[2, :])
-		title!(p_2v, "Latent x variance, x_2")
-		display(p_2v)
+		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
-
 	end
 end
 
-main(200)
+function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc)
+    x_limits = xlims(p_mcmc)
+    gamma_dist_q = Gamma(a_q, 1/b_q) 
+	ci_lower = quantile(gamma_dist_q, 0.025)
+	ci_upper = quantile(gamma_dist_q, 0.975)
+
+    x = range(x_limits..., length=100)
+    pdf_values = pdf.(gamma_dist_q, x)
+    τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
+	
+	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	
+	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
+    
+	return τ_q
+end
+
+function main_graph(n, sd)
+	println("Running experiments for linear growth model (with graph):\n")
+	println("T = $n\n")
+	A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+	Q = Diagonal([1.0, 1.0])
+	R = [0.1]
+	K = size(A_lg, 1)
+	μ_0 = zeros(K)
+	Σ_0 = Diagonal(ones(K))
+
+	println("Ground-truth R:")
+	show(stdout, "text/plain", R)
+	println("\nGround-truth Q:")
+	show(stdout, "text/plain", Q)
+
+	println("\n----- BEGIN Run seed: $sd -----\n")
+	Random.seed!(sd)
+	y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
+	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 100000, 10000, 4, true)
+	xm_vb, std_vb, Q_gam = test_vb(y, x_true)
+
+	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r)
+	display(plot_r)
+
+	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1)
+	display(plot_q1)
+
+	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2)
+	display(plot_q2)
+
+	p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, :])
+	title!(p, "Latent x mean, x_1")
+	display(p)
+
+	p_v = compare_mcmc_vi((std_mcmc.^2)[1, :], (std_vb.^2)[1, :])
+	title!(p_v, "Latent x variance, x_1")
+	display(p_v)
+
+	p2 = compare_mcmc_vi(xm_mcmc[2, :], xm_vb[2, :])
+	title!(p2, "Latent x mean, x_2")
+	display(p2)
+
+	p_2v = compare_mcmc_vi((std_mcmc.^2)[2, :], (std_vb.^2)[2, :])
+	title!(p_2v, "Latent x variance, x_2")
+	display(p_2v)
+	println("----- END Run seed: $sd -----\n")
+end
+
+main_graph(500, 233)
 
 function comp_vb_mle(y, x_true, hyperoptim=false)
 	println("--- MLE ---")

@@ -189,13 +189,21 @@ function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=fa
 	x_std = std(s_x, dims=1)[1, :]
 
 	if show_plot
-		# Create a latent x inference plot
+		p_r = density(R_chain)
+		title!(p_r, "MCMC R")
+		display(p_r)
+
+		p_q = density(Q_chain)
+		title!(p_q, "MCMC Q")
+		display(p_q)
+
 		p = plot_CI_ll(x_m, x_std, x_true)
+		title!(p, "MCMC latent x inference")
 		display(p)
 	end
 
 	# empirical truth to compare with VI
-	return x_m, x_std
+	return x_m, x_std, s_r, s_q
 end
 
 begin
@@ -421,40 +429,32 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	return 1/E_τ_r, 1/E_τ_q, el_s, qθ
 end
 
-function plot_rq_CI(q::qθ)
-
-	# Create a Gamma distribution object
-	gamma_dist_q = Gamma(q.α_q_p, 1/q.β_q_p)  # Note: The Gamma constructor in Julia uses the scale parameter, which is 1/β.
-
-	# Compute the 95% credible interval
+function plot_rq_CI(q::qθ, p_r, p_q)
+	mcmc_q = histogram(1 ./ p_q, bins=200, normalize=:pdf, label="MCMC τ_q")
+	gamma_dist_q = Gamma(q.α_q_p, 1/q.β_q_p) 
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
-	# Create a range of x values for plotting
-	x = range(0, stop=ci_upper + 1, length=100)  # extend the range a bit beyond the upper bound of the CI
-
-	# Compute the PDF values for the Gamma distribution
+	x = range(extrema(1 ./p_q)..., length=100) 
 	pdf_values = pdf.(gamma_dist_q, x)
-
-	# Plot the Gamma distribution
-	τ_q = plot(x, pdf_values, label="τ_q", lw=2, xlabel="precision", ylabel="Density")
-
-	# Highlight the 95% credible interval
-	plot!([ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	τ_q = plot!(mcmc_q, x, pdf_values, label="VI τ_q", lw=2, xlabel="Precision", ylabel="Density")
+	
+	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
 	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
 
-	display(τ_q)
-
-	gamma_dist_r = Gamma(q.α_r_p, 1/q.β_r_p)  # Note: The Gamma constructor in Julia uses the scale parameter, which is 1/β.
+	mcmc_r = histogram(1 ./ p_r, bins=200, normalize=:pdf, label="MCMC τ_r")
+	gamma_dist_r = Gamma(q.α_r_p, 1/q.β_r_p) 
 	ci_lower = quantile(gamma_dist_r, 0.025)
 	ci_upper = quantile(gamma_dist_r, 0.975)
-	x = range(0, stop=ci_upper + 1, length=100)  # extend the range a bit beyond the upper bound of the CI
-	pdf_values = pdf.(gamma_dist_r, x)
-	τ_r = plot(x, pdf_values, label="τ_r", lw=2, xlabel="precision", ylabel="Density")
 
-	plot!([ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	x = range(extrema(1 ./ p_r)..., length=100)
+	pdf_values = pdf.(gamma_dist_r, x)
+	τ_r = plot!(mcmc_r, x, pdf_values, label="VI τ_r", lw=2, xlabel="Precision", ylabel="Density")
+
+	plot!(τ_r, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
 	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
-	display(τ_r)
+
+	return τ_q, τ_r
 end
 
 function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
@@ -518,12 +518,10 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 		display(x_plot)
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-		plot_rq_CI(q_rq)
-		sleep(1)
 	end
 
 	# to compare with MCMC
-	return μs_s, x_std
+	return μs_s, x_std, q_rq
 end
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
@@ -551,33 +549,51 @@ function main(max_T)
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
-	seeds = [134]
-	#seeds = [88, 145, 105, 104, 134]
+	seeds = [88, 145, 105, 104, 134]
 	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-		mcmc_x_m, mcmc_x_std = test_gibbs_ll(y, x_true, 20000, 10000, 1)
+		test_gibbs_ll(y, x_true, 20000, 10000, 1)
 		println()
-		vb_x_m, vb_x_std = test_vb_ll(y, x_true)
-
-		p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
-		#p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
-		title!(p, "Latent X inference mean")
-		display(p)
-
-		p2 = compare_mcmc_vi(mcmc_x_std.^2, vb_x_std.^2)
-		#p2 = qqplot(mcmc_x_std.^2, vb_x_std.^2, qqline = :R)
-		title!(p2, "Latent X inference variance")
-		xlims!(p2, (0.08, 0.11))
-		ylims!(p2, (0.08, 0.11))
-		display(p2)
-		println("----- END Run seed: $sd -----\n")
+		test_vb_ll(y, x_true)
 	end
 end
 
-main(1000)
+function main_graph(max_T, sd)
+	println("Running experiments for local level model (with graphs):\n")
+	println("T = $max_T")
+	R = 0.1
+	Q = 1.0
+	println("Ground-truth r = $R, q = $Q")
+
+	println("\n----- BEGIN Run seed: $sd -----\n")
+	Random.seed!(sd)
+	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
+	mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 60000, 10000, 3, true)
+	println()
+	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true)
+
+	plot_r, plot_q = plot_rq_CI(q_rq, rs, qs)
+	display(plot_r)
+	display(plot_q)
+
+	p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
+	#p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
+	title!(p, "Latent X inference mean")
+	display(p)
+
+	p2 = compare_mcmc_vi(mcmc_x_std.^2, vb_x_std.^2)
+	#p2 = qqplot(mcmc_x_std.^2, vb_x_std.^2, qqline = :R)
+	title!(p2, "Latent X inference variance")
+	xlims!(p2, (0.08, 0.11))
+	ylims!(p2, (0.08, 0.11))
+	display(p2)
+	println("----- END Run seed: $sd -----\n")
+end
+
+main_graph(500, 134)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
