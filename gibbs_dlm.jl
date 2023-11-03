@@ -15,20 +15,29 @@ begin
 	using DataFrames
 end
 
+"""
+MCMC
+"""
 function forward_filter(Ys, A, C, R, Q, m_0, C_0)
+	"""
+	A : State transition (K X K)
+	C : Emission (P X K)
+	R : Observation noise (P X P)
+	Q : System noise (diagonal) (K X K)
+	"""
 	_, T = size(Ys)
-	d, _ = size(A)
+	K, _ = size(A)
 	
 	# Initialize, using "DLM with R" notation
-	ms = zeros(d, T+1)
-	Cs = zeros(d, d, T+1)
+	ms = zeros(K, T+1)
+	Cs = zeros(K, K, T+1)
 
 	ms[:, 1] = m_0
 	Cs[:, :, 1] = C_0
 	
 	# one-step ahead latent distribution, used in backward sampling
-	a_s = zeros(d, T)
-	Rs = zeros(d, d, T)
+	a_s = zeros(K, T)
+	Rs = zeros(K, K, T)
 
 	for t in 1:T
 		# Prediction
@@ -46,13 +55,12 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	return ms, Cs, a_s, Rs
 end
 
-
-function ffbs_x(Ys, A, C, R, Q, m_0, P_0, n = 1)
-	d, _ = size(A)
+function ffbs_x(Ys, A, C, R, Q, m_0, P_0)
+	K, _ = size(A)
 	_, T = size(Ys)
 
-	ms, Cs, as, Rs = forward_filter(Ys, A, C, R, Q, m_0, P_0)
-	X = zeros(d, T+1)
+	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, P_0)
+	X = zeros(K, T+1)
 
 	# DEBUG FFBS
 	try
@@ -67,13 +75,12 @@ function ffbs_x(Ys, A, C, R, Q, m_0, P_0, n = 1)
 
 	# backward sampling
 	for t in T:-1:1
-		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - as[:, t])
+		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
 		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 	end
 	return X
 end
-
 
 # Multi-variate DLM with full unknown $R, Q$
 function sample_R_(y, x, C, v_0, S_0)
@@ -110,8 +117,8 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	P, T = size(y)
 	K = size(A, 2)
 	
-	μ_0 = vec(mean(y, dims=2)) 
-	λ_0 = Matrix{Float64}(I, K, K)
+	m_0 = zeros(K)
+	C_0 = Matrix{Float64}(I, K, K)
 	
 	v_0 = P + 1.0 
 	S_0 = Matrix{Float64}(0.01 * I, P, P)
@@ -137,21 +144,12 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	
 	# Gibbs sampler
 	for i in 1:mcmc+burn_in
-	    # Update the states
-
-		if debug
-			x = ffbs_x(y, A, C, R, Q, μ_0, λ_0, i)
-		end
-		x = ffbs_x(y, A, C, R, Q, μ_0, λ_0, i)
+		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
 		x = x[:, 2:end]
 
-		# Update the system noise
 		Q = sample_Q(x, A, α, β)
-
-	    # Update the observation noise
 		R = sample_R_(y, x, C, v_0, S_0)
 	
-	    # Store the samples
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -163,7 +161,9 @@ function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false
 	return samples_X, samples_Q, samples_R
 end
 
-# VBEM for general R, diagonal Q
+"""
+VBEM
+"""
 begin
 	struct Prior
 	    ν_R::Float64
@@ -565,7 +565,9 @@ function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_le
 	return inv(E_R_inv), inv(E_Q_inv), el_s
 end
 
-# Gibbs sampling of diagonal co-variances
+"""
+MCMC (Diagonal R, Q)
+"""
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
     P, T = size(Ys)
     ρ_sampled = zeros(P)
@@ -783,23 +785,6 @@ function test_data(rnd, max_T = 500)
 	return y, x_true
 end
 
-function test_ffbs()
-	y, x_true = test_data(1)
-	A = [1.0 0.0; 0.0 1.0]
-	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = [0.5 0.2; 0.2 0.5]
-	m_0 = [0.0, 0.0]
-	P_0 = Diagonal([1.0, 1.0])
-	_, Ps, _, _ = forward_filter(y, A, C, R, Q, m_0, P_0)
-	println(Ps[:, :, end])
-	X = ffbs_x(y, A, C, R, Q, m_0, P_0)
-
-	X = X[:, 2:end]
-	println("MSE, MAD of FFBS: ", error_metrics(x_true, X))
-end
-
-
 function test_gibbs()
 	seeds = [103, 133, 123, 105, 233]
 	#seeds = [111, 199, 188, 234, 236]
@@ -815,7 +800,6 @@ function test_gibbs()
 	end
 end
 
-
 function com_vb_gibbs()
 	seeds = [108, 134, 123, 105, 233]
 	#seeds = [111, 199, 188, 234, 236]
@@ -823,7 +807,6 @@ function com_vb_gibbs()
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
 		test_gibbs_cov(y, x_true, 60000, 10000, 3)
-		# println()
 		test_vb(y, x_true)
 	end
 end
@@ -842,7 +825,9 @@ function out_txt()
 end
 
 out_txt()
-
+"""
+TO-DO: validate posterior comparison mcmc, vi using graphs
+"""
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
 # DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

@@ -19,143 +19,93 @@ begin
 	end
 end
 
-# Gibbs sampling analog to Beale
-function sample_a(xs, q)
-	T = length(xs)
-	return rand(Normal(sum(xs[1:T-1] .* xs[2:T]) / sum(xs[1:T-1].^2), sqrt(q / sum(xs[1:T-1].^2))))
-end
-
-function sample_c(xs, ys, r)
-    return rand(Normal(sum(ys .* xs) / sum(xs.^2), sqrt(r / (sum(xs.^2)))))
-end
-
+"""
+MCMC
+"""
 function sample_r(xs, ys, c, α_r, β_r)
 	T = length(ys)
     α_post = α_r + T / 2
     β_post = β_r + sum((ys - c * xs).^2) / 2
 
-	# emission precision posterior [Re-used later]
+	# emission precision posterior
 	λ_r = rand(Gamma(α_post, 1 / β_post))
-	return 1/λ_r # inverse precision is variance
+	return 1/λ_r
 end
 
-function sample_x_ffbs(y, A, C, Q, R, μ_0, σ_0)
-    T = length(y)
-    μs = Vector{Float64}(undef, T)
-    σs = Vector{Float64}(undef, T)
-    μs[1] = μ_0
-    σs[1] = σ_0
-	
-    for t in 2:T # forward filter
-        μ_pred = A * μs[t-1]
-        σ_pred = A * σs[t-1] * A + Q
-        K = σ_pred * C * (1/ (C^2 * σ_pred + R))
-		
-        μs[t] = μ_pred + K * (y[t] - C * μ_pred)
-        σs[t] = (1 - K * C) * σ_pred
-    end
-
-	x = Vector{Float64}(undef, T)
-    x[T] = rand(Normal(μs[T], sqrt(σs[T])))
-
-    for t in (T-1):-1:1 # backward sample
-        μ_cond = μs[t] + σs[t] * A * (1/ (A * σs[t] * A + Q)) * (x[t+1] - A * μs[t])
-        σ_cond = σs[t] - σs[t] * A * (1/ (A * σs[t] * A + Q)) * A * σs[t]
-        x[t] = rand(Normal(μ_cond, sqrt(σ_cond)))
-    end
-    return x
-end
-
-function gibbs_uni_dlm(y, num_iterations=2000, burn_in=200, thinning=5)
-	T = length(y)
-	μ_0 = 0.0  # Prior mean for the states
-	λ_0 = 1.0  # Prior precision for the states
-	α = 0.01  # Shape parameter for Inverse-Gamma prior
-	β = 0.01  # Scale parameter for Inverse-Gamma prior
-	
-	# Initial values for the parameters
-	a = rand(Normal(μ_0, λ_0))
-	c = rand(Normal(μ_0, λ_0))
-	r = rand(InverseGamma(α, β))
-	q = 1.0 # assumed fixed
-
-	n_samples = Int.(num_iterations/thinning)
-	# Store the samples
-	samples_x = zeros(n_samples, T)
-	samples_a = zeros(n_samples)
-	samples_c = zeros(n_samples)
-	samples_r = zeros(n_samples)
-	
-	# Gibbs sampler
-	for i in 1:num_iterations+burn_in
-	    # Update the states
-		x = sample_x_ffbs(y, a, c, q, r, μ_0, 1/λ_0)
-	
-	    # Update the state transition factor
-	    a = sample_a(x, q)
-	
-	    # Update the emission factor
-	    c = sample_c(x, y, r)
-	
-	    # Update the observation noise
-		r = sample_r(x, y, c, α, β)
-	
-	    # Store the samples
-		if i > burn_in && mod(i - burn_in, thinning) == 0
-			index = div(i - burn_in, thinning)
-		    samples_x[index, :] = x
-		    samples_a[index] = a
-		    samples_c[index] = c
-		    samples_r[index] = r
-		end
-	end
-	return samples_x, samples_a, samples_c, samples_r
-end
-
-# DLM with R, r, q as unknown, given a, c
-function sample_q(xs, a, α_q, β_q, x_0)
+function sample_q(xs, a, α_q, β_q)
 	T = length(xs)
     α_post = α_q + T / 2
-    β_post = β_q + sum((xs[2:T] .- (a .* xs[1:T-1])).^2) /2 
+    β_post = β_q + sum((xs[2:end] .- (a .* xs[1:end-1])).^2) / 2 
 	
-	β_post += (xs[1] - a * x_0)^2 /2
-
 	# system precision posterior
 	λ_q = rand(Gamma(α_post, 1 / β_post)) 
 	
-	return 1/λ_q # inverse precision is variance
+	return 1/λ_q
 end
 
-function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
+function forward_filter(y, A, C, R, Q, m_0, c_0)
 	T = length(y)
-	μ_0 = 0.0  # Prior mean for the states
-	λ_0 = 1.0  # Prior precision for the states
+    ms = Vector{Float64}(undef, T+1)
+    cs = Vector{Float64}(undef, T+1)
+    ms[1] = m_0
+    cs[1] = c_0
+	a_s = Vector{Float64}(undef, T)
+	rs = Vector{Float64}(undef, T)
+
+    for t in 1:T # forward filter
+        a_s[t] = a_t = A * ms[t]
+        rs[t] = r_t = A * cs[t] * A + Q
+
+		f_t = C * a_t
+		q_t = C * r_t * C + R
+
+        ms[t+1] = a_t + r_t*C*(1/q_t)*(y[t] - f_t)
+        cs[t+1] = r_t - r_t*C*(1/q_t)*C*r_t
+    end
+
+	return ms, cs, a_s, rs
+end
+
+function sample_x_ffbs(y, A, C, R, Q, m_0, c_0)
+	T = length(y)
+	x = Vector{Float64}(undef, T+1)
+	ms, cs, a_s, rs = forward_filter(y, A, C, R, Q, m_0, c_0)
 	
-	α = 0.01  # Shape parameter for Inverse-Gamma prior
-	β = 0.01  # Scale parameter for Inverse-Gamma prior
+	# t = T
+    x[end] = rand(Normal(ms[end], sqrt(cs[end])))
+
+    for t in T:-1:1 # backward sample (dlm with R Algorithm 4.1)
+        h_t = ms[t] + cs[t] * A * (1 /rs[t]) * (x[t+1] - a_s[t])
+        H_t = cs[t] - cs[t] * A * (1/ rs[t]) * A * cs[t]
+		x[t] = rand(Normal(h_t, sqrt(H_t)))
+    end
+
+    return x
+end
+
+function gibbs_ll(y, a, c, mcmc=1500, burn_in=100, thinning=1)
+	T = length(y)
+	m_0 = 0.0  # Prior mean for the states
+	c_0 = 1.0  # Prior precision for the states
+	
+	α = 0.1  # Shape parameter for Inverse-Gamma prior
+	β = 0.1  # Scale parameter for Inverse-Gamma prior
 	
 	# Initial values for the parameters
 	r = rand(InverseGamma(α, 1/β))
 	q = rand(InverseGamma(α, 1/β))
 
 	n_samples = Int.(mcmc/thinning)
-	# Store the samples
 	samples_x = zeros(n_samples, T)
 	samples_q = zeros(n_samples)
 	samples_r = zeros(n_samples)
 	
-	# Gibbs sampler
 	for i in 1:mcmc+burn_in
-	    # Update the states
-		x = sample_x_ffbs(y, a, c, q, r, μ_0, λ_0)
-		
-		# Update the system noise
-		q = sample_q(x, a, α, β, μ_0)
-		
-	    # Update the observation noise
+		x = sample_x_ffbs(y, a, c, r, q, m_0, c_0)
+		x = x[2:end]
+		q = sample_q(x, a, α, β)
 		r = sample_r(x, y, c, α, β)
 	
-	    # Store the samples
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_x[index, :] = x
@@ -163,11 +113,10 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=1500, thinning=1)
 		    samples_r[index] = r
 		end
 	end
-
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
+function test_gibbs_ll(y, x_true, mcmc=1500, burn_in=100, thin=1, show_plot=false)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, mcmc, burn_in, thin)
@@ -187,6 +136,10 @@ function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=fa
 	x_m = mean(s_x, dims=1)[1, :]
 	println("average x sample error " , error_metrics(x_true, x_m))
 	x_std = std(s_x, dims=1)[1, :]
+	x_var = var(s_x, dims=1)[1, :]
+
+	p = plot(s_x'[1:end, 1:300], label = "", title="MCMC")
+	display(p)
 
 	if show_plot
 		p_r = density(R_chain)
@@ -203,8 +156,12 @@ function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=fa
 	end
 
 	# empirical truth to compare with VI
-	return x_m, x_std, s_r, s_q
+	return x_m, x_var, s_r, s_q
 end
+
+"""
+VBEM
+"""
 
 begin
 	struct HSS_ll
@@ -506,11 +463,14 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 
 	μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
-	x_std = sqrt.(σs_s)
+	x_var = σs_s
 
 	println("\nVB q(r) mode: ", r)
 	println("VB q(q) mode: ", q)
 	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+
+	# p = plot(σs_s, label="x var")
+	# display(p)
 
 	if show_plot
 		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
@@ -521,23 +481,51 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	end
 
 	# to compare with MCMC
-	return μs_s, x_std, q_rq
+	return μs_s, x_var, q_rq
 end
+
+"""
+On-going FFBS debug
+"""
+function test()
+	println("Running experiments for local level model (with graphs):\n")
+	R = 1.0
+	Q = 1.0
+	println("Ground-truth r = $R, q = $Q")
+
+	test_size = 20
+	Random.seed!(10)
+	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, test_size)
+	println("test q: ", sample_q(x_true, 1.0, 0.1, 0.1))
+	println("test r: ", sample_r(x_true, y, 1.0, 0.1, 0.1))
+
+	Xs = zeros(test_size, 2000)
+	for iter in 1:2000
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1.0)
+		Xs[:, iter] = xs[2:end]
+	end
+
+	p = plot(Xs[1:end, 1:300], label = "", title="FFBS, V=$R, W=$Q")
+	display(p)
+
+	test_gibbs_ll(y, x_true)
+end
+
+#test()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:yellow, alpha=0.3)
-
-	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:blue, alpha=0.3)
+	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:red, alpha=0.6)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.3)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
 	max_val = max(maximum(mcmc), maximum(vi))
 
 	# Plot the y=x line
-	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:red, linewidth=2)
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:blue, linewidth=2)
 
 	return p_vi
 end
@@ -555,8 +543,7 @@ function main(max_T)
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-		test_gibbs_ll(y, x_true, 20000, 10000, 1)
-		println()
+		test_gibbs_ll(y, x_true, 10000, 5000, 1)
 		test_vb_ll(y, x_true)
 	end
 end
@@ -564,16 +551,15 @@ end
 function main_graph(max_T, sd)
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
-	R = 0.1
+	R = 1.0
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
 	println("\n----- BEGIN Run seed: $sd -----\n")
 	Random.seed!(sd)
 	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-	mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 60000, 10000, 3, true)
-	println()
-	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true)
+	mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 500, 1, true)
+	vb_x_m, vb_x_var, q_rq = test_vb_ll(y, x_true)
 
 	plot_r, plot_q = plot_rq_CI(q_rq, rs, qs)
 	display(plot_r)
@@ -584,16 +570,16 @@ function main_graph(max_T, sd)
 	title!(p, "Latent X inference mean")
 	display(p)
 
-	p2 = compare_mcmc_vi(mcmc_x_std.^2, vb_x_std.^2)
-	#p2 = qqplot(mcmc_x_std.^2, vb_x_std.^2, qqline = :R)
+	p2 = compare_mcmc_vi(mcmc_x_var, vb_x_var)
+	# p2 = qqplot(mcmc_x_var, vb_x_var, qqline = :R)
 	title!(p2, "Latent X inference variance")
-	xlims!(p2, (0.08, 0.11))
-	ylims!(p2, (0.08, 0.11))
+	# xlims!(p2, (2.0, 2.5))
+	# ylims!(p2, (2.0, 2.5))
 	display(p2)
 	println("----- END Run seed: $sd -----\n")
 end
 
-main_graph(500, 134)
+#main_graph(100, 111)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -610,7 +596,7 @@ function out_txt(n)
 	end
 end
 
-#out_txt(200)
+out_txt(200)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

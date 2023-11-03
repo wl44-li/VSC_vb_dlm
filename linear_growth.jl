@@ -14,6 +14,9 @@ begin
 	using StateSpaceModels
 end
 
+"""
+VBEM
+"""
 function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
     D, T = size(y)
     K = size(A, 1)
@@ -217,7 +220,9 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	return inv(E_R_inv), inv(E_Q_inv), el_s, Q_gam
 end
 
-# MCMC (gibbs sampling) 
+"""
+MCMC
+"""
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
     P, T = size(Ys)
     ρ_sampled = zeros(P)
@@ -267,81 +272,74 @@ function test_Gibbs_RQ(rnd)
 	println("Q", Q)
 end
 
-function ffbs_x(Ys, A, C, R, Q, μ_0, Σ_0)
+function forward_filter(Ys, A, C, R, Q, m_0, C_0)
+	"""
+	A : State transition (2 X 2)
+	C : Emission (2 X 1)
+	R : Observation noise (1 X 1)
+	Q : System noise (diagonal) (2 X 2)
+	"""
 	_, T = size(Ys)
-    d, _ = size(A)
+	K, _ = size(A)
 	
-    # Initialize
-    ms = zeros(d, T)
-	Cs = zeros(d, d, T)
+	# Initialize, using "DLM with R" notation
+	ms = zeros(K, T+1)
+	Cs = zeros(K, K, T+1)
+
+	ms[:, 1] = m_0
+	Cs[:, :, 1] = C_0
 	
-	as = zeros(d, T)
-	Rs = zeros(d, d, T)
-	X = zeros(d, T)
+	# one-step ahead latent distribution, used in backward sampling
+	a_s = zeros(K, T)
+	Rs = zeros(K, K, T)
 
-	as[:, 1] = a_1 = A * μ_0
-	Rs[:, :, 1] = R_1 = A * Σ_0 * A' + Q
-
-	f_1 = C * a_1
-    S_1 = C * R_1 * C' + R
-
-    ms[:, 1] = a_1 + R_1 * C' * inv(S_1) * (Ys[:, 1] - f_1)
-    Cs[:, :, 1] = R_1 - R_1 * C' * inv(S_1) * C * R_1
+	for t in 1:T
+		# Prediction
+		a_s[:, t] = a_t = A * ms[:, t]
+		Rs[:, :, t] = R_t = A * Cs[:, :, t] * A' + Q #W
 		
-	# forward filter 
-    for t in 2:T
-        # latent one-step ahead prediction
-        as[:, t] = a_t = A * ms[:, t-1]
-        Rs[:, :, t] = R_t = A * Cs[:, :, t-1] * A' + Q
-		
-		# y Update
-        f_t = C * a_t
-        S_t = C * R_t * C' + R
+		# Update
+		f_t = C * a_t
+		S_t = C * R_t * C' + R #V
 
 		# filter 
-        ms[:, t] = a_t + R_t * C' * inv(S_t) * (Ys[:, t] - f_t)
-		Cs[:, :, t] = R_t - R_t * C' * inv(S_t) * C * R_t
+		ms[:, t+1] = a_t + R_t * C' * inv(S_t) * (Ys[:, t] - f_t)
+		Cs[:, :, t+1]= R_t - R_t * C' * inv(S_t) * C * R_t
 	end
+	return ms, Cs, a_s, Rs
+end
 
-		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
+function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
+	_, T = size(Ys)
+    K, _ = size(A)
+	X = zeros(K, T+1)
+
+	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
+	
+    # Initialize t = T
+    X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	
 	# backward sampling
-	for t in (T-1):-1:1
-		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t+1])*(X[:, t+1] - as[:, t+1])
-		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t+1]) * A * Cs[:, :, t]
-	
+	for t in T:-1:1
+		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
+		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
+
 		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 	end
 
-	# sample initial x_0
-	h_0 = μ_0 + Σ_0 * A' * inv(Rs[:, :, 1])*(X[:, 1] - as[:, 1])
-	H_0 = Σ_0 - Σ_0 * A' * inv(Rs[:, :, 1]) * A * Σ_0
-
-	x_0 = rand((MvNormal(h_0, Symmetric(H_0))))
-
-	return X, x_0
+	return X
 end
 
-function test_ffbs_x(rnd, max_T = 500)
-	A_lg = [1.0 1.0; 0.0 1.0]
-    C_lg = [1.0 0.0]
-	Q_lg = Diagonal([0.3, 0.3])
-	R_lg = [0.1]
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(rnd)
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, max_T)
-
-	xs, _ = ffbs_x(y, A_lg, C_lg, R_lg, Q_lg, μ_0, Σ_0)
-	println("MSE, MAD: ", error_metrics(x_true, xs))
-end
+"""
+On-going FFBS debug
+"""
 
 function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
-	μ_0 = prior.μ_0
-	λ_0 = prior.Σ_0
+	m_0 = prior.μ_0
+	C_0 = prior.Σ_0
 	
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
 	ρ_r = rand(Gamma(a, b), P)
@@ -358,19 +356,12 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 	
 	# Gibbs sampler
 	for i in 1:mcmc+burn_in
-		if debug
-			println("MCMC diagonal R, Q debug, iteration : $i")
-		end
-	    # Update the states
-		x, _ = ffbs_x(y, A, C, R, Q, μ_0, λ_0)
+		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
+		x = x[:, 2:end]
 		
-		# Update the system noise
 		Q = sample_Q(x, A, α, β)
-		
-	    # Update the observation noise
 		R = sample_R(x, y, C, a, b)
 	
-	    # Store the samples
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -378,7 +369,6 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 		    samples_R[index, :, :] = R
 		end
 	end
-
 	return samples_X, samples_Q, samples_R
 end
 
@@ -386,11 +376,9 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-
-	# Debug: different hyper-parameter usages [scale param should be large to be flat prior]
 	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
-	
 	n_samples = Int.(mcmc/thin)
+
 	println("--- MCMC ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_lg(y, A_lg, C_lg, prior, mcmc, burn_in, thin)
 	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---\n")
@@ -413,7 +401,7 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 
 	if show_plot
 		R_chain = Chains(reshape(1 ./ Rs_samples, n_samples, 1))
-		p_r = density(R_chain)
+		p_r = density(R_chain[:, 1, :], label="MCMC Λ_R")
 		title!(p_r, "MCMC Λ_R")
 		#display(p_r)
 
@@ -441,7 +429,7 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 			sleep(1)
 		end
 
-		return xs_m, xs_std, p_r_his, p1_his, p4_his
+		return xs_m, xs_std, p_r, p1, p4
 	end
 	return xs_m, xs_std
 end
@@ -486,7 +474,6 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	return μs_s, stds, Q_gam
 end
 
-
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
@@ -504,7 +491,6 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
 
 	return p_vi
 end
-
 
 function main(n)
 	println("Running experiments for linear growth model:\n")
@@ -529,27 +515,35 @@ function main(n)
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
+		
+		"""
+		On-going ffbs Debug
+		"""
 		test_gibbs(y, x_true, 20000, 10000, 1)
-		println()
-		comp_vb_mle(y, x_true)
+
+		#comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc)
-    x_limits = xlims(p_mcmc)
+function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param = nothing, x_lmin = 0.0, x_lmax = 20.0)
+    x_min, x_max = xlims(p_mcmc)
+	x_min = max(x_lmin, x_min)
+	x_max = min(x_lmax, x_max)
     gamma_dist_q = Gamma(a_q, 1/b_q) 
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
-    x = range(x_limits..., length=100)
+    x = range(x_min, x_max, length=100)
     pdf_values = pdf.(gamma_dist_q, x)
     τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
 	
 	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
-	
-	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
+	vspan!(τ_q, [ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing, xlims=(x_min, x_max))
     
+	if true_param !== nothing
+		vline!(τ_q, [true_param], label = "ground_truth", linestyle=:dash, linewidth=2)
+	end
 	return τ_q
 end
 
@@ -559,29 +553,29 @@ function main_graph(n, sd)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q = Diagonal([1.0, 1.0])
-	R = [0.1]
+	R = [0.33]
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
 	Σ_0 = Diagonal(ones(K))
 
 	println("Ground-truth R:")
 	show(stdout, "text/plain", R)
-	println("\nGround-truth Q:")
+	println("\n\nGround-truth Q:")
 	show(stdout, "text/plain", Q)
 
 	println("\n----- BEGIN Run seed: $sd -----\n")
 	Random.seed!(sd)
 	y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
-	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 100000, 10000, 4, true)
-	xm_vb, std_vb, Q_gam = test_vb(y, x_true)
+	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 20000, 10000, 1, true)
+	xm_vb, std_vb, Q_gam = test_vb(y, x_true, false)
 
-	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r)
+	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, 3.03, 0.0, 7.0)
 	display(plot_r)
 
-	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1)
+	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1, 1.0, 0.0, 3.0)
 	display(plot_q1)
 
-	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2)
+	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2, 1.0)
 	display(plot_q2)
 
 	p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, :])
@@ -596,13 +590,15 @@ function main_graph(n, sd)
 	title!(p2, "Latent x mean, x_2")
 	display(p2)
 
-	p_2v = compare_mcmc_vi((std_mcmc.^2)[2, :], (std_vb.^2)[2, :])
+	#p_2v = compare_mcmc_vi((std_mcmc.^2)[2, :], (std_vb.^2)[2, :])
+	p_2v= qqplot((std_mcmc.^2)[2, :], (std_vb.^2)[2, :], qqline = :R)
 	title!(p_2v, "Latent x variance, x_2")
 	display(p_2v)
+	
 	println("----- END Run seed: $sd -----\n")
 end
 
-main_graph(500, 233)
+#main_graph(500, 123)
 
 function comp_vb_mle(y, x_true, hyperoptim=false)
 	println("--- MLE ---")
@@ -635,7 +631,7 @@ function out_txt(n)
 	end
 end
 
-#out_txt(500)
+out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

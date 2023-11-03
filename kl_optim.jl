@@ -38,7 +38,6 @@ function kl_Wishart(ν_q, S_q, ν_0, S_0)
     return term1 + 0.5 * (term2 + term3) 
 end
 
-
 function kl_gamma(a_0, b_0, a_s, b_s)
 	kl = a_s*log(b_s) - a_0*log(b_0) - loggamma(a_s) + loggamma(a_0)
 	kl += (a_s - a_0)*(digamma(a_s) - log(b_s))
@@ -46,13 +45,11 @@ function kl_gamma(a_0, b_0, a_s, b_s)
 	return kl
 end
 
-
 function kl_C(μ_0, γ, μ_C, Σ_C, exp_ρs)
 	kl = -0.5*logdet(Σ_C*Diagonal(γ))
 	kl -= 0.5*tr(I - (Σ_C*Diagonal(γ) + (μ_C - μ_0)*(μ_C - μ_0)')*exp_ρs*Diagonal(γ))
 	return kl
 end
-
 
 function error_metrics(true_means, smoothed_means)
     # mean squared error (MSE), mean absolute deviation (MAD)
@@ -69,7 +66,6 @@ function error_metrics(true_means, smoothed_means)
     return mse, mad
 end
 
-
 struct HPP_D
     α::Float64
     β::Float64 
@@ -79,14 +75,12 @@ struct HPP_D
     Σ_0::Matrix{Float64} # auxiliary hidden state co-variance
 end
 
-
 struct Q_Gamma
 	a
 	b
 	α
 	β
 end
-
 
 function update_hyp_D(hpp::HPP_D, Q_gam::Q_Gamma)
 	b_s = Q_gam.b
@@ -141,14 +135,12 @@ function update_hyp_D(hpp::HPP_D, Q_gam::Q_Gamma)
 	return a, b, α, β
 end
 
-
 struct HSS
 	W_C::Array{Float64, 2}
 	W_A::Array{Float64, 2}
 	S_C::Array{Float64, 2}
 	S_A::Array{Float64, 2}
 end
-
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 
@@ -198,7 +190,6 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
     end
 end
 
-
 function plot_latent(x_true, x_inf, max_T = 50)
     # assume both are T x k
     T, K = size(x_true)
@@ -225,7 +216,6 @@ function plot_latent(x_true, x_inf, max_T = 50)
 
     return p
 end
-
 
 function plot_x_itvl(means, stds, x_true = nothing, n = 30)
     # Ensure that n is within bounds
