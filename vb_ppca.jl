@@ -64,17 +64,19 @@ function vb_m(ys, hps::HPP, ss::HSS_PPCA)
 	    q_ρ = Gamma.(a_s, 1 ./ b_s)
 	catch err
 	    if isa(err, DomainError)
-	        println("DomainError occurred: check that a_s and b_s are positive values")
-			println("a_s: ", a_s[1])
-			println("b_s: ", b_s)
+	        println("--- DomainError occurred: check that a_s and b_s are positive values")
+			println("\ta_s: ", a_s[1])
+			println("\tb_s: ", b_s)
 			b_s = abs.(b_s)
-			println("Temporary fix: ", b_s)
-			println("Please consider adjusting hyperparameters α, γ, a, b and re-run PPCA")
+			println("\tTemporary fix: ", b_s)
+			println("Please consider adjusting hyperparameters α, γ, a, b and re-run PPCA ---\n")
+
 			q_ρ = Gamma.(a_s, 1 ./ b_s)
 	    else
 	        rethrow(err)
 	    end
 	end
+
 	ρ̄ = mean.(q_ρ)
 	
 	# Exp_ϕ 
@@ -258,45 +260,59 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
         elbo_prev = elbo
 
 		if (i == max_iter)
-			println("--- Warning: VB have not necessarily converged at $max_iter iterations ---")
+			println("--- Warning: VB has not necessarily converged at $max_iter iterations ---")
 		end
 	end
 		
 	return exp_np, elbo_prev
 end
 
-function test()
-	Random.seed!(121)
-	T = 1000
+function test_elbo(sd)
+	Random.seed!(sd)
+	T = 500
 	μ_0_t = zeros(2)
 	Σ_0_t = Diagonal(ones(2))
 	C_ = [1.0 0.0; 0.6 1.0; 0.3 0.2; 0.5 0.1; 0.1 0.3; 0.4 0.1; 0.8 0.2; 0.3 0.3; 0.4 0.6; 0.1 0.4] 
 	R_ = Diagonal(ones(10) .* 0.1)
 	y_10, x_2 = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R_, μ_0_t, Σ_0_t, T)
 
-	for k in 1:2
-		γ = ones(k) .* 100
-		a = 0.01
-		b = 0.01
+	elbos = zeros(9)
+	for k in 1:9
+		γ = ones(k) .* 1000
+		a = 0.1
+		b = 0.1
 		μ_0 = zeros(k)
 		Σ_0 = Matrix{Float64}(I, k, k)
 		hpp = HPP(γ, a, b, μ_0, Σ_0)
 		exp_np, el = vb_ppca_c(y_10, hpp, true)
-		println("\nelbo, k=$k", el)
-
-		ωs, _, _ = v_forward(y_10, exp_np, hpp)
-		println("latent x error: ", error_metrics(x_2, ωs))
-		println()
+		println("\nElBO, k=$k :", el)
+		elbos[k] = el
+		
 		if k == 2
+			println("K = $k")
+			ωs, _, _ = v_forward(y_10, exp_np, hpp)
+			println("latent x error: ", error_metrics(x_2, ωs))
+			println()
+
 			W = exp_np.C
 			WTW = W'*W
 			C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
 			y_recon = W*inv(WTW)*C*x_2
 			println("y recon error: ", error_metrics(y_10, y_recon))
+			println()
 		end
 	end
+
+	p = plot(elbos, xlabel = "K", ylabel = "ELBO", title = "ELBO comparison", label="")
+	vline!(p, [2], label="ground-truth", linestyle=:dash)
+	display(p)
+
+	p_ = plot(elbos[1:3], xlabel = "K", ylabel = "ELBO", title = "ELBO comparison", label="")
+	vline!(p_, [2], label="ground-truth", linestyle=:dash)
+	display(p_)
 end
 
+#test_elbo(123)
 
 function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
@@ -343,7 +359,7 @@ function comp_ppca(max_T = 1000)
 		bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
 		println("reconstruction y error: ", error_metrics(y, bay_y_recon))
 
-		hpp = HPP(ones(2), 0.1, 0.1, μ_0, Σ_0)
+		hpp = HPP(ones(2) .* 10, 0.1, 0.1, μ_0, Σ_0)
 		println("\n--- VBEM ---\n Loading Matrix W:")
 		exp_np, _ = vb_ppca_c(y, hpp, true)
 		show(stdout, "text/plain", exp_np.C)
@@ -360,6 +376,8 @@ function comp_ppca(max_T = 1000)
 	end
 end
 
+comp_ppca(1000)
+
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
@@ -372,7 +390,7 @@ function out_txt(n)
 	end
 end
 
-out_txt(1000)
+#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
