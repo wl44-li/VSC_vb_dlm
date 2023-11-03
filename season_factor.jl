@@ -50,7 +50,7 @@ function vb_m_static(y, S_C, W_C, hpp::HPP_D, C::Array{Float64, 2})
     b_s = [hpp.b + 0.5 * G[i, i] for i in 1:D]
 	q_ρ = Gamma.(a_s, 1 ./ b_s)
 	Exp_R⁻¹ = diagm(mean.(q_ρ))
-    return Exp_R⁻¹
+    return Exp_R⁻¹, a_, b_s
 end
 
 function test_m_static()
@@ -84,7 +84,6 @@ function vb_e_static(y, A, C, E_R, prior::HPP_D, smooth_out = false)
     # Initialize the filtered means and covariances
     μ_f = zeros(K, T)
     Σ_f = zeros(K, K, T)
-
     f_s = zeros(P, T)
 	S_s = zeros(P, P, T)
 	
@@ -92,30 +91,28 @@ function vb_e_static(y, A, C, E_R, prior::HPP_D, smooth_out = false)
 	A_1 = A * μ_0
 	R_1 = A * Σ_0 * A'
 	
-	f_1 = C * A_1
-	S_1 = C * R_1 * C' + E_R
-	f_s[:, 1] = f_1
-	S_s[:, :, 1] = S_1
+	f_s[:, 1] = f_1 = C * A_1
+	S_s[:, :, 1] = S_1 = C * R_1 * C' + E_R
 	
     μ_f[:, 1] = A_1 + R_1 * C'* inv(S_1) * (y[:, 1] - f_1)
     Σ_f[:, :, 1] = R_1 - R_1*C'*inv(S_1)*C*R_1 
     
     # Forward pass (kalman filter)
-    for t = 2:T
+    for t in 2:T
         # Predicted state mean and covariance
         μ_p = A * μ_f[:, t-1]
         Σ_p = A * Σ_f[:, :, t-1] * A'
 
 		# marginal y - normalization
-		f_t = C * μ_p
-		S_t = C * Σ_p * C' + E_R
-		f_s[:, t] = f_t
-		S_s[:, :, t] = S_t
+		f_s[:, t] = f_t = C * μ_p
+		S_s[:, :, t] = S_t = C * Σ_p * C' + E_R
 		
 		# Filtered state mean and covariance (2.8a - 2.8c DLM with R)
 		μ_f[:, t] = μ_p + Σ_p * C' * inv(S_t) * (y[:, t] - f_t)
 		Σ_f[:, :, t] = Σ_p - Σ_p * C' * inv(S_t) * C * Σ_p	
     end
+
+    log_z = sum(logpdf(MvNormal(f_s[:, i], Symmetric(S_s[:, :, i])), y[:, i]) for i in 1:T)
 
     if (smooth_out)
 		return μ_f, Σ_f
@@ -124,7 +121,7 @@ function vb_e_static(y, A, C, E_R, prior::HPP_D, smooth_out = false)
     W_C = sum(Σ_f[:, :, t] + μ_f[:, t] * μ_f[:, t]' for t in 1:T)
 	S_C = sum(μ_f[:, t] * y[:, t]' for t in 1:T)
 
-    return W_C, S_C
+    return W_C, S_C, log_z
 end
 
 function test_e_static()
@@ -148,18 +145,35 @@ end
 
 #test_e_static()
 
-function vb_ss(ys, A, C, prior::HPP_D, max_iter = 200)
-
+function vb_ss(ys, A, C, prior::HPP_D, max_iter=200, tol=1e-5)
+	D, _ = size(ys)
     E_R = missing
-
     W_C, S_C = ones(size(A)), ones(size(C'))
-    for _ in 1:max_iter
-		E_R = vb_m_static(ys, S_C, W_C, prior, C)
-				
-		W_C, S_C = vb_e_static(ys, A, C, inv(E_R), prior)
+    elbo_prev = -Inf
+	el_s = zeros(max_iter)
+
+    for i in 1:max_iter
+		E_R, a_q, b_q = vb_m_static(ys, S_C, W_C, prior, C)
+		W_C, S_C, log_z = vb_e_static(ys, A, C, inv(E_R), prior)
+
+        kl_ρ = sum([kl_gamma(prior.a, prior.b, a_q, (b_q)[s]) for s in 1:D])
+        elbo = log_z - kl_ρ 
+		el_s[i] = elbo
+
+        if abs(elbo - elbo_prev) < tol
+			println("Stopped at iteration: $i")
+			el_s = el_s[1:i]
+            break
+		end
+
+        elbo_prev = elbo
+
+        if (i == max_iter)
+			println("Warning: VB have not necessarily converged at $max_iter iterations with tolerance $tol")
+		end
 	end
 
-	return inv(E_R)
+	return inv(E_R), el_s
 end
 
 function test_vb_static(iter)
@@ -177,14 +191,16 @@ function test_vb_static(iter)
     y, x = gen_sea(A, C, R, Q, T, x_1)
 
     prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-    @time E_R = vb_ss(y, A, C, prior, iter)
+    @time E_R, els = vb_ss(y, A, C, prior, iter)
 
+    p = plot(els, label="elbo")
+    display(p)
     μs, _ = vb_e_static(y, A, C, inv(E_R), prior, true)
 
     println("R: ", E_R)
-    println("mse, mad of seasonal components:", error_metrics(x, μs))
+    println("MSE, MAD of seasonal components:", error_metrics(x, μs))
     plot_latent(x', μs')
 end
 
-test_vb_static(50)
+test_vb_static(100)
 

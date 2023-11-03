@@ -46,7 +46,6 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	return ms, Cs, a_s, Rs
 end
 
-
 function ffbs_x(Ys, A, C, R, Q, m_0, P_0, n = 1)
 	d, _ = size(A)
 	_, T = size(Ys)
@@ -73,7 +72,6 @@ function ffbs_x(Ys, A, C, R, Q, m_0, P_0, n = 1)
 	end
 	return X
 end
-
 
 # Multi-variate DLM with full unknown $R, Q$
 function sample_R_(y, x, C, v_0, S_0)
@@ -799,7 +797,6 @@ function test_ffbs()
 	println("MSE, MAD of FFBS: ", error_metrics(x_true, X))
 end
 
-
 function test_gibbs()
 	seeds = [103, 133, 123, 105, 233]
 	#seeds = [111, 199, 188, 234, 236]
@@ -814,7 +811,6 @@ function test_gibbs()
 		println("----- END Run seed: $sd -----\n")
 	end
 end
-
 
 function com_vb_gibbs()
 	seeds = [108, 134, 123, 105, 233]
