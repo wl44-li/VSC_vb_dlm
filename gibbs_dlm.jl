@@ -164,6 +164,7 @@ end
 """
 VBEM
 """
+
 begin
 	struct Prior
 	    ν_R::Float64
@@ -801,8 +802,8 @@ function test_gibbs()
 end
 
 function com_vb_gibbs()
-	seeds = [108, 134, 123, 105, 233]
-	#seeds = [111, 199, 188, 234, 236]
+	#seeds = [108, 134, 123, 105, 233]
+	seeds = [111, 199, 188, 234, 236]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
