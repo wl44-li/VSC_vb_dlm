@@ -1,5 +1,5 @@
 include("kl_optim.jl")
-
+include("turing_ll.jl")
 begin
 	using Distributions, Random
 	using LinearAlgebra
@@ -83,17 +83,17 @@ function sample_x_ffbs(y, A, C, R, Q, m_0, c_0)
     return x
 end
 
-function gibbs_ll(y, a, c, mcmc=1500, burn_in=100, thinning=1)
+function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	T = length(y)
 	m_0 = 0.0  # Prior mean for the states
 	c_0 = 1.0  # Prior precision for the states
 	
-	α = 0.1  # Shape parameter for Inverse-Gamma prior
-	β = 0.1  # Scale parameter for Inverse-Gamma prior
+	α = 0.1  # Shape for Inverse-Gamma prior
+	β = 0.1  # Scale for Inverse-Gamma prior
 	
 	# Initial values for the parameters
-	r = rand(InverseGamma(α, 1/β))
-	q = rand(InverseGamma(α, 1/β))
+	r = rand(InverseGamma(α, β))
+	q = rand(InverseGamma(α, β))
 
 	n_samples = Int.(mcmc/thinning)
 	samples_x = zeros(n_samples, T)
@@ -116,7 +116,7 @@ function gibbs_ll(y, a, c, mcmc=1500, burn_in=100, thinning=1)
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(y, x_true, mcmc=1500, burn_in=100, thin=1, show_plot=false)
+function test_gibbs_ll(y, x_true, mcmc=3000, burn_in=1000, thin=1, show_plot=false)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, mcmc, burn_in, thin)
@@ -138,7 +138,8 @@ function test_gibbs_ll(y, x_true, mcmc=1500, burn_in=100, thin=1, show_plot=fals
 	x_std = std(s_x, dims=1)[1, :]
 	x_var = var(s_x, dims=1)[1, :]
 
-	p = plot(s_x'[1:end, 1:300], label = "", title="MCMC")
+	# DEBUG here
+	p = plot(s_x'[1:end, 1:200], label = "", title="MCMC Trace Plot x[0:T]")
 	display(p)
 
 	if show_plot
@@ -493,8 +494,8 @@ function test()
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
-	test_size = 20
-	Random.seed!(10)
+	test_size = 50
+	Random.seed!(111)
 	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, test_size)
 	println("test q: ", sample_q(x_true, 1.0, 0.1, 0.1))
 	println("test r: ", sample_r(x_true, y, 1.0, 0.1, 0.1))
@@ -505,7 +506,7 @@ function test()
 		Xs[:, iter] = xs[2:end]
 	end
 
-	p = plot(Xs[1:end, 1:300], label = "", title="FFBS, V=$R, W=$Q")
+	p = plot(Xs[1:end, 1:200], label = "", title="FFBS, V=$R, W=$Q")
 	display(p)
 
 	test_gibbs_ll(y, x_true)
@@ -548,17 +549,22 @@ function main(max_T)
 	end
 end
 
-function main_graph(max_T, sd)
+function main_graph(sd, max_T=100)
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
 	R = 1.0
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
-
-	println("\n----- BEGIN Run seed: $sd -----\n")
 	Random.seed!(sd)
 	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-	mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 500, 1, true)
+
+	"""
+	Choice of Gibbs, NUTS, HMC
+	"""
+	# mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1)
+	# mcmc_x_m, mcmc_x_var, rs, qs = test_nuts(y)
+	mcmc_x_m, mcmc_x_var, rs, qs = test_hmc(y)
+
 	vb_x_m, vb_x_var, q_rq = test_vb_ll(y, x_true)
 
 	plot_r, plot_q = plot_rq_CI(q_rq, rs, qs)
@@ -566,20 +572,28 @@ function main_graph(max_T, sd)
 	display(plot_q)
 
 	p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
-	#p = qqplot(mcmc_x_m, vb_x_m, qqline = :R)
 	title!(p, "Latent X inference mean")
 	display(p)
 
 	p2 = compare_mcmc_vi(mcmc_x_var, vb_x_var)
-	# p2 = qqplot(mcmc_x_var, vb_x_var, qqline = :R)
-	title!(p2, "Latent X inference variance")
-	# xlims!(p2, (2.0, 2.5))
-	# ylims!(p2, (2.0, 2.5))
+	title!(p2, "Latent X Var")
 	display(p2)
-	println("----- END Run seed: $sd -----\n")
+
+	p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC(HMC)", ylabel="VI")
+	display(p4)
+
+	p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC(HMC)", ylabel="VI")
+	xlims!(p3, 0.40, 0.50)
+	ylims!(p3, 0.40, 0.50)
+	display(p3)
+
+	p5 = qqplot(vb_x_var, mcmc_x_var, qqline = :R, title="QQ_plot Var", xlabel="VI", ylabel="MCMC(HMC)")
+	xlims!(p5, 0.40, 0.50)
+	ylims!(p5, 0.40, 0.50)
+	display(p5)
 end
 
-#main_graph(100, 111)
+main_graph(111, 100)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -596,7 +610,7 @@ function out_txt(n)
 	end
 end
 
-out_txt(200)
+#out_txt(200)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
