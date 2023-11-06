@@ -376,7 +376,7 @@ function comp_ppca(max_T = 1000)
 	end
 end
 
-comp_ppca(1000)
+#comp_ppca(1000)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -389,6 +389,144 @@ function out_txt(n)
 		end
 	end
 end
+
+"""
+TO-DO: Compare ELBO for optimal K
+"""
+
+function k_elbo_p4(max_T=100)
+	# P = 4, K = 2
+	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2; 0.6 0.5]
+	σ² = 0.5
+	R = Diagonal(ones(4) .* σ²)
+
+	println("Ground-truth Loading Matrix W:")
+	show(stdout, "text/plain", C_)
+	println("\nσ²: ", σ²)
+
+	elbos_k1 = zeros(10)
+	elbos_k2 = zeros(10)  
+	elbos_k3 = zeros(10)
+
+	seeds = [103, 133, 123, 105, 233, 88, 145, 236, 111, 134]
+	index_1 = 1
+	index_2 = 1
+	index_3 = 1
+
+	for sd in seeds
+		Random.seed!(sd)
+		y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal([1.0, 1.0]), max_T)
+
+		for k in 1:4
+			γ = ones(k) .* 10
+			a = 0.1
+			b = 0.1
+			μ_0 = zeros(k)
+			Σ_0 = Matrix{Float64}(I, k, k)
+			hpp = HPP(γ, a, b, μ_0, Σ_0)
+			_, el = vb_ppca_c(y, hpp, true)
+
+			if k == 1
+				elbos_k1[index_1] = el
+				index_1+=1
+			end
+
+			if k == 2
+				elbos_k2[index_2] = el
+				index_2+=1
+			end
+
+			if k == 3
+				elbos_k3[index_3] = el
+				index_3+=1
+			end
+		end
+	end
+
+	println(elbos_k1)
+	println(elbos_k2)
+	println(elbos_k3)
+
+	# groups = repeat(["K = 1", "K = 2", "K = 3"], inner = length(elbos_k1))
+
+	# # Combine all ELBO values into one array
+	# all_elbos = vcat(elbos_k1, elbos_k2, elbos_k3)
+
+	# p = boxplot(groups, all_elbos, label="", ylabel="ELBO", xlabel="K", whisker_style=:dash, legend=false)
+	# display(p)
+
+	# groups_12 = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
+
+	# # Combine all ELBO values into one array
+	# elbos_12 = vcat(elbos_k1, elbos_k2)
+
+	# p2 = boxplot(groups_12, elbos_12, label="", ylabel="ELBO", xlabel="K", whisker_style=:dash, legend=false)
+	# display(p2)
+end
+
+#k_elbo_p4(500)
+
+function k_elbo_p3(max_T=100)
+	# P = 3, K = 2
+	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2]
+	σ² = 0.5
+	R = Diagonal(ones(3) .* σ²)
+
+	println("Ground-truth Loading Matrix W:")
+	show(stdout, "text/plain", C_)
+	println("\nσ²: ", σ²)
+
+	elbos_k1 = zeros(10)
+	elbos_k2 = zeros(10)  
+
+	seeds = [111, 133, 123, 105, 233, 88, 145, 236, 104, 1]
+	index_1 = 1
+	index_2 = 1
+
+	for sd in seeds
+		Random.seed!(sd)
+		y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal([1.0, 1.0]), max_T)
+
+		for k in 1:2
+			γ = ones(k) .* 0.1
+			a = 0.1
+			b = 0.1
+			μ_0 = zeros(k)
+			Σ_0 = Matrix{Float64}(I, k, k)
+			hpp = HPP(γ, a, b, μ_0, Σ_0)
+			_, el = vb_ppca_c(y, hpp, true)
+
+			if k == 1
+				elbos_k1[index_1] = el
+				index_1+=1
+			end
+
+			if k == 2
+				elbos_k2[index_2] = el
+				index_2+=1
+			end
+		end
+	end
+
+	# println(elbos_k1)
+	# println(elbos_k2)
+
+	groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
+	nam = repeat("S" .* string.(seeds), outer = 2)
+	all_elbos = vcat(elbos_k1, elbos_k2)
+
+	p = groupedbar(nam, all_elbos, group = groups, xlabel = "Groups by Seed", ylabel = "ELBO",
+        title = "ELBO by Seed and K", bar_width = 0.67,
+        lw = 0, framestyle = :box)
+
+	ylims!(p, -2250, -2100)
+	display(p)
+
+	# p = boxplot(groups, all_elbos, label="", ylabel="ELBO", xlabel="K", whisker_style=:dash, legend=false)
+	# display(p)
+end
+
+k_elbo_p3(500)
 
 #out_txt(500)
 

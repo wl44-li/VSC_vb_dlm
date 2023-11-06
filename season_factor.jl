@@ -1,4 +1,6 @@
 include("kl_optim.jl")
+include("local_level_vb.jl")
+include("linear_growth.jl")
 
 begin
 	using Distributions, Random
@@ -202,5 +204,105 @@ function test_vb_static(iter)
     plot_latent(x', μs')
 end
 
-test_vb_static(100)
+"""
+TO-DO: ELBO Comparison for model selection (local level, linear growth, seasonal)
+"""
 
+function vi_elbo_comp(gen_fun = "ss", max_T = 500)
+	seeds = [111, 133, 123, 105, 233, 88, 145, 236, 104, 1]
+    elbo_lg = zeros(10)
+    elbo_ll = zeros(10)
+    elbo_ss = zeros(10)
+
+    for i in 1:length(seeds)
+        y, x_true = missing, missing
+        Random.seed!(seeds[i])
+
+        if gen_fun == "ss"
+            rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
+            r = 0.1  # Observation noise variance
+            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
+            C = [1.0 0.0 0.0]  # Emission matrix
+            Q = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
+            R = [r]
+            x_1 = [0.50, 0.35, 0.15] # Satisfies identifiability constraint: sum to 0
+           
+            y, x_true = gen_sea(A, C, R, Q, max_T, x_1)
+            K = size(A, 1)
+            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+
+            _, el_ss = vb_ss(y, A, C, prior)
+            elbo_ss[i] = el_ss[end]
+
+            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+            _, _, el_ll, _ = vb_ll_c(vec(y), hpp_ll)
+            elbo_ll[i] = el_ll[end]
+
+            A_lg = [1.0 1.0; 0.0 1.0]
+            C_lg = [1.0 0.0]
+            K = size(A_lg, 1)
+            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+            _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
+            elbo_lg[i] = el_lg[end]
+
+        end
+
+        if gen_fun == "ll"
+            y, x_true = gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
+            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+            _, _, el_ll, _ = vb_ll_c(y, hpp_ll)
+            elbo_ll[i] = el_ll[end]
+
+            A_lg = [1.0 1.0; 0.0 1.0]
+            C_lg = [1.0 0.0]
+            K = size(A_lg, 1)
+            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+            _, _, el_lg, _ = vbem_lg_c(reshape(y, 1, :), A_lg, C_lg, prior_lg)
+            elbo_lg[i] = el_lg[end]
+
+            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
+            C = [1.0 0.0 0.0]  # Emission matrix
+            K = size(A, 1)
+            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+            _, el_ss = vb_ss(reshape(y, 1, :), A, C, prior)
+            elbo_ss[i] = el_ss[end]
+        end
+
+        if gen_fun == "lg"
+            A_lg = [1.0 1.0; 0.0 1.0]
+            C_lg = [1.0 0.0]
+            Q = Diagonal([1.0, 1.0])
+            R = [0.1]
+            K = size(A_lg, 1)
+            μ_0 = zeros(K)
+            Σ_0 = Diagonal(ones(K))
+            y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
+            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+            _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
+            elbo_lg[i] = el_lg[end]
+
+            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+            _, _, el_ll, _ = vb_ll_c(vec(y), hpp_ll)
+            elbo_ll[i] = el_ll[end]
+
+            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
+            C = [1.0 0.0 0.0]  # Emission matrix
+            K = size(A, 1)
+            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+            _, el_ss = vb_ss(reshape(y, 1, :), A, C, prior)
+            elbo_ss[i] = el_ss[end]
+        end
+
+    end
+
+    println(elbo_ss)
+    println(elbo_ll)
+    println(elbo_lg)
+    groups = repeat(["LLM", "LTM", "SM"], inner = length(elbo_ll))
+    all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
+
+    p = dotplot(groups, all_elbos, label="", ylabel="ELBO", legend=false)
+    display(p)
+end
+
+vi_elbo_comp("lg")

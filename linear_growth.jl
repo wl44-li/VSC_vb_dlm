@@ -631,7 +631,7 @@ function out_txt(n)
 	end
 end
 
-out_txt(500)
+#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

@@ -559,7 +559,7 @@ function main_graph(sd, max_T=100)
 	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
 	"""
-	Choice of Gibbs, NUTS, HMC
+	TO-DO: Choice of Gibbs, NUTS, HMC
 	"""
 	# mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1)
 	# mcmc_x_m, mcmc_x_var, rs, qs = test_nuts(y)
@@ -593,7 +593,7 @@ function main_graph(sd, max_T=100)
 	display(p5)
 end
 
-main_graph(111, 100)
+#main_graph(111, 100)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
