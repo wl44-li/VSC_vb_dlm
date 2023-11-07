@@ -518,8 +518,8 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:red, alpha=0.6)
-	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.3)
+	p_mcmc = scatter(mcmc, vi, label="MCMC", color=:red, alpha=0.7)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.4)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
@@ -549,7 +549,7 @@ function main(max_T)
 	end
 end
 
-function main_graph(sd, max_T=100)
+function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
 	R = 1.0
@@ -559,12 +559,22 @@ function main_graph(sd, max_T=100)
 	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
 	"""
-	TO-DO: Choice of Gibbs, NUTS, HMC
+	Choice of Gibbs, NUTS, HMC
 	"""
-	# mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1)
-	# mcmc_x_m, mcmc_x_var, rs, qs = test_nuts(y)
-	mcmc_x_m, mcmc_x_var, rs, qs = test_hmc(y)
+	mcmc_x_m, mcmc_x_var, rs, qs = missing, missing, missing, missing
+	
+	if sampler == "gibbs" #default
+		mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1)
+	end
 
+	if sampler == "hmc" #turing
+		mcmc_x_m, mcmc_x_var, rs, qs = test_hmc(y)
+	end
+
+	if sampler == "nuts" #turing
+		mcmc_x_m, mcmc_x_var, rs, qs = test_nuts(y)
+	end
+	
 	vb_x_m, vb_x_var, q_rq = test_vb_ll(y, x_true)
 
 	plot_r, plot_q = plot_rq_CI(q_rq, rs, qs)
@@ -573,27 +583,32 @@ function main_graph(sd, max_T=100)
 
 	p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
 	title!(p, "Latent X inference mean")
+	xlabel!(p, "MCMC($sampler)")
 	display(p)
 
 	p2 = compare_mcmc_vi(mcmc_x_var, vb_x_var)
 	title!(p2, "Latent X Var")
+	xlabel!(p2, "MCMC($sampler)")
 	display(p2)
 
-	p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC(HMC)", ylabel="VI")
+	p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC($sampler)", ylabel="VI")
 	display(p4)
 
-	p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC(HMC)", ylabel="VI")
-	xlims!(p3, 0.40, 0.50)
-	ylims!(p3, 0.40, 0.50)
+	p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC($sampler)", ylabel="VI")
+	# xlims!(p3, 0.40, 0.50)
+	# ylims!(p3, 0.40, 0.50)
 	display(p3)
 
-	p5 = qqplot(vb_x_var, mcmc_x_var, qqline = :R, title="QQ_plot Var", xlabel="VI", ylabel="MCMC(HMC)")
-	xlims!(p5, 0.40, 0.50)
-	ylims!(p5, 0.40, 0.50)
-	display(p5)
+	# p5 = qqplot(vb_x_var, mcmc_x_var, qqline = :R, title="QQ_plot Var", xlabel="VI", ylabel="MCMC($sampler)")
+	# xlims!(p5, 0.40, 0.50)
+	# ylims!(p5, 0.40, 0.50)
+	# display(p5)
 end
 
-#main_graph(111, 100)
+# main_graph(111, 100, "nuts")
+
+# main_graph(111, 100, "gibbs")
+
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

@@ -512,16 +512,19 @@ function k_elbo_p3(max_T=100)
 	# println(elbos_k2)
 
 	groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
-	nam = repeat("S" .* string.(seeds), outer = 2)
+	nam = repeat("S" .* string.(1:10), outer = 2)
 	all_elbos = vcat(elbos_k1, elbos_k2)
 
-	p = groupedbar(nam, all_elbos, group = groups, xlabel = "Groups by Seed", ylabel = "ELBO",
-        title = "ELBO by Seed and K", bar_width = 0.67,
+	p = groupedbar(nam, all_elbos, group = groups, xlabel = "Groups by Different Seeds", ylabel = "ELBO",
+        title = "ELBO Model Selection, K=2", bar_width = 0.67,
         lw = 0, framestyle = :box)
 
 	ylims!(p, -2250, -2100)
 	display(p)
 
+	# p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange], label="", ylabel="ELBO", legend=false)
+	# title!(p2, "ELBO Model Selection, K=2")
+    # display(p2)
 	# p = boxplot(groups, all_elbos, label="", ylabel="ELBO", xlabel="K", whisker_style=:dash, legend=false)
 	# display(p)
 end

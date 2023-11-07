@@ -208,7 +208,7 @@ end
 TO-DO: ELBO Comparison for model selection (local level, linear growth, seasonal)
 """
 
-function vi_elbo_comp(gen_fun = "ss", max_T = 500)
+function vi_elbo_comp(gen_fun = "S", max_T = 500)
 	seeds = [111, 133, 123, 105, 233, 88, 145, 236, 104, 1]
     elbo_lg = zeros(10)
     elbo_ll = zeros(10)
@@ -218,7 +218,7 @@ function vi_elbo_comp(gen_fun = "ss", max_T = 500)
         y, x_true = missing, missing
         Random.seed!(seeds[i])
 
-        if gen_fun == "ss"
+        if gen_fun == "S"
             rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
             r = 0.1  # Observation noise variance
             A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
@@ -247,7 +247,7 @@ function vi_elbo_comp(gen_fun = "ss", max_T = 500)
 
         end
 
-        if gen_fun == "ll"
+        if gen_fun == "LL"
             y, x_true = gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
             hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
             _, _, el_ll, _ = vb_ll_c(y, hpp_ll)
@@ -268,7 +268,7 @@ function vi_elbo_comp(gen_fun = "ss", max_T = 500)
             elbo_ss[i] = el_ss[end]
         end
 
-        if gen_fun == "lg"
+        if gen_fun == "LT"
             A_lg = [1.0 1.0; 0.0 1.0]
             C_lg = [1.0 0.0]
             Q = Diagonal([1.0, 1.0])
@@ -301,8 +301,13 @@ function vi_elbo_comp(gen_fun = "ss", max_T = 500)
     groups = repeat(["LLM", "LTM", "SM"], inner = length(elbo_ll))
     all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
 
-    p = dotplot(groups, all_elbos, label="", ylabel="ELBO", legend=false)
+    p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ELBO", legend=false)
+    title!(p, "ELBO Model Selection, data:$gen_fun")
     display(p)
 end
 
-vi_elbo_comp("lg")
+vi_elbo_comp("LT")
+
+vi_elbo_comp("LL")
+
+vi_elbo_comp("S")
