@@ -142,47 +142,39 @@ struct HSS
 	S_A::Array{Float64, 2}
 end
 
-function gen_data(A, C, Q, R, μ_0, Σ_0, T)
+function gen_data(A, C, Q, R, m_0, C_0, T)
 
     if length(A) == 1 && length(C) == 1 # uni-variate
-		x = zeros(T)
+		x = zeros(T+1)
 		y = zeros(T)
 		
+        x[1] = 0 # assume x_0 is 0
+
 		for t in 1:T
-		    if t == 1
-		        x[t] = μ_0 + sqrt(Q) * randn()
-		    else
-		        x[t] = A * x[t-1] + sqrt(Q) * randn()
-		    end
-		    	y[t] = C * x[t] + sqrt(R) * randn()
+            x[t+1] = A * x[t] + sqrt(Q) * randn()
+		    y[t] = C * x[t+1] + sqrt(R) * randn()
 		end
 		return y, x
 
     else
         K, _ = size(A)
         D, _ = size(C)
-        x = zeros(K, T)
+        x = zeros(K, T+1)
         y = zeros(D, T)
 
-        x[:, 1] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
+        x[:, 1] = rand(MvNormal(m_0, C_0))
 
-        if D == 1
-            y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), sqrt.(R)))
-        else
-            y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
-        end
-
-        for t in 2:T
+        for t in 1:T
             if (tr(Q) != 0)
-                x[:, t] = A * x[:, t-1] + rand(MvNormal(zeros(K), Q))
+                x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
             else
-                x[:, t] = A * x[:, t-1] # Q zero matrix special case of PPCA
+                x[:, t+1] = A * x[:, t] # Q zero matrix special case of PPCA
             end
 
             if D == 1
-                y[:, t] = C * x[:, t] + rand(MvNormal(zeros(D), sqrt.(R))) # linear growth 
+                y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), sqrt.(R))) # linear growth 
             else
-                y[:, t] = C * x[:, t] + rand(MvNormal(zeros(D), R)) 
+                y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), R)) 
             end
         end
 

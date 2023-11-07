@@ -56,7 +56,7 @@ function forward_filter(y, A, C, R, Q, m_0, c_0)
         a_s[t] = a_t = A * ms[t]
         rs[t] = r_t = A * cs[t] * A + Q
 
-		f_t = C * a_t
+		f_t = C * a_t #y pred
 		q_t = C * r_t * C + R
 
         ms[t+1] = a_t + r_t*C*(1/q_t)*(y[t] - f_t)
@@ -88,15 +88,15 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	m_0 = 0.0  # Prior mean for the states
 	c_0 = 1.0  # Prior precision for the states
 	
-	α = 0.1  # Shape for Inverse-Gamma prior
-	β = 0.1  # Scale for Inverse-Gamma prior
+	α = 0.5  # Shape for Inverse-Gamma prior
+	β = 0.5  # Scale for Inverse-Gamma prior
 	
 	# Initial values for the parameters
 	r = rand(InverseGamma(α, β))
 	q = rand(InverseGamma(α, β))
 
 	n_samples = Int.(mcmc/thinning)
-	samples_x = zeros(n_samples, T)
+	samples_x = zeros(T, n_samples)
 	samples_q = zeros(n_samples)
 	samples_r = zeros(n_samples)
 	
@@ -108,7 +108,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
-		    samples_x[index, :] = x
+		    samples_x[:, index] = x
 			samples_q[index] = q
 		    samples_r[index] = r
 		end
@@ -116,7 +116,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(y, x_true, mcmc=3000, burn_in=1000, thin=1, show_plot=false)
+function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, mcmc, burn_in, thin)
@@ -133,14 +133,16 @@ function test_gibbs_ll(y, x_true, mcmc=3000, burn_in=1000, thin=1, show_plot=fal
 	println()
 	println("R summary stats: ", summary_df_r)
 
-	x_m = mean(s_x, dims=1)[1, :]
-	println("average x sample error " , error_metrics(x_true, x_m))
-	x_std = std(s_x, dims=1)[1, :]
-	x_var = var(s_x, dims=1)[1, :]
-
-	# DEBUG here
-	p = plot(s_x'[1:end, 1:200], label = "", title="MCMC Trace Plot x[0:T]")
+	x_m = mean(s_x, dims=2)[:]
+	println("average x sample error " , error_metrics(x_true[2:end], x_m))
+	
+	x_std = std(s_x, dims=2)[:]
+	p = plot(x_std, label = "", title="MCMC x std")
 	display(p)
+
+	# # DEBUG here
+	# p = plot(s_x'[1:end, 1:200], label = "", title="MCMC Trace Plot x[0:T]")
+	# display(p)
 
 	if show_plot
 		p_r = density(R_chain)
@@ -157,7 +159,7 @@ function test_gibbs_ll(y, x_true, mcmc=3000, burn_in=1000, thin=1, show_plot=fal
 	end
 
 	# empirical truth to compare with VI
-	return x_m, x_var, s_r, s_q
+	return x_m, x_std, s_r, s_q
 end
 
 """
@@ -387,32 +389,25 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	return 1/E_τ_r, 1/E_τ_q, el_s, qθ
 end
 
-function plot_rq_CI(q::qθ, p_r, p_q)
-	mcmc_q = histogram(1 ./ p_q, bins=200, normalize=:pdf, label="MCMC τ_q")
-	gamma_dist_q = Gamma(q.α_q_p, 1/q.β_q_p) 
+function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
+	mcmc_q = histogram(1 ./ mcmc_s, bins=200, normalize=:pdf, label="MCMC")
+	gamma_dist_q = Gamma(a_q, 1/b_q)
+
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
-	x = range(extrema(1 ./p_q)..., length=100) 
+	x = range(extrema(1 ./mcmc_s)..., length=100) 
 	pdf_values = pdf.(gamma_dist_q, x)
-	τ_q = plot!(mcmc_q, x, pdf_values, label="VI τ_q", lw=2, xlabel="Precision", ylabel="Density")
+	τ_ = plot!(mcmc_q, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
 	
-	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	plot!(τ_, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
 	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
 
-	mcmc_r = histogram(1 ./ p_r, bins=200, normalize=:pdf, label="MCMC τ_r")
-	gamma_dist_r = Gamma(q.α_r_p, 1/q.β_r_p) 
-	ci_lower = quantile(gamma_dist_r, 0.025)
-	ci_upper = quantile(gamma_dist_r, 0.975)
+	if true_param !== nothing
+		vline!(τ_, [true_param], label = "ground_truth", linestyle=:dash, linewidth=2)
+	end
 
-	x = range(extrema(1 ./ p_r)..., length=100)
-	pdf_values = pdf.(gamma_dist_r, x)
-	τ_r = plot!(mcmc_r, x, pdf_values, label="VI τ_r", lw=2, xlabel="Precision", ylabel="Density")
-
-	plot!(τ_r, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
-	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
-
-	return τ_q, τ_r
+	return τ_
 end
 
 function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
@@ -444,10 +439,10 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	print_results(model)
 
 	fm = get_filtered_state(model)
-	filter_err = error_metrics(x_true, fm)
+	filter_err = error_metrics(x_true[2:end], fm)
 
 	sm = get_smoothed_state(model)
-	smooth_err = error_metrics(x_true, sm)
+	smooth_err = error_metrics(x_true[2:end], sm)
 
 	println("\nMLE Filtered MSE, MAD: ", filter_err)
 	println("MLE Smoother MSE, MAD: ", smooth_err)
@@ -464,14 +459,11 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 
 	μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
-	x_var = σs_s
+	x_std = sqrt.(σs_s)
 
 	println("\nVB q(r) mode: ", r)
 	println("VB q(q) mode: ", q)
-	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
-
-	# p = plot(σs_s, label="x var")
-	# display(p)
+	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s))
 
 	if show_plot
 		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
@@ -482,37 +474,40 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	end
 
 	# to compare with MCMC
-	return μs_s, x_var, q_rq
+	return μs_s, x_std, q_rq
 end
 
 """
 On-going FFBS debug
 """
-function test()
+function test(T=200)
 	println("Running experiments for local level model (with graphs):\n")
 	R = 1.0
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
-	test_size = 50
 	Random.seed!(111)
-	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, test_size)
-	println("test q: ", sample_q(x_true, 1.0, 0.1, 0.1))
-	println("test r: ", sample_r(x_true, y, 1.0, 0.1, 0.1))
+	y, _ = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
 
-	Xs = zeros(test_size, 2000)
-	for iter in 1:2000
+	Xs = zeros(T, 5000)
+	for iter in 1:5000
 		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1.0)
 		Xs[:, iter] = xs[2:end]
 	end
 
-	p = plot(Xs[1:end, 1:200], label = "", title="FFBS, V=$R, W=$Q")
+	# p = plot(Xs[1:end, end-200:end], label = "", title="FFBS, V=$R, W=$Q")
+	# display(p)
+
+	x_std = std(Xs, dims=2)[:]
+	p = plot(x_std, title="FFBS x std, T=$T", label="")
 	display(p)
 
-	test_gibbs_ll(y, x_true)
+	#test_nuts(y)
 end
 
-#test()
+# test(20)
+# test(100)
+# test(200)
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -561,23 +556,23 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	"""
 	Choice of Gibbs, NUTS, HMC
 	"""
-	mcmc_x_m, mcmc_x_var, rs, qs = missing, missing, missing, missing
+	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_var, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1)
 	end
 
 	if sampler == "hmc" #turing
-		mcmc_x_m, mcmc_x_var, rs, qs = test_hmc(y)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_hmc(y)
 	end
 
 	if sampler == "nuts" #turing
-		mcmc_x_m, mcmc_x_var, rs, qs = test_nuts(y)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
 	
-	vb_x_m, vb_x_var, q_rq = test_vb_ll(y, x_true)
+	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true)
 
-	plot_r, plot_q = plot_rq_CI(q_rq, rs, qs)
+	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1.0), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1.0)
 	display(plot_r)
 	display(plot_q)
 
@@ -586,19 +581,17 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	xlabel!(p, "MCMC($sampler)")
 	display(p)
 
-	p2 = compare_mcmc_vi(mcmc_x_var, vb_x_var)
-	title!(p2, "Latent X Var")
+	p2 = compare_mcmc_vi(mcmc_x_std, vb_x_std)
+	title!(p2, "Latent X std")
 	xlabel!(p2, "MCMC($sampler)")
 	display(p2)
 
-	p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC($sampler)", ylabel="VI")
-	display(p4)
-
-	p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC($sampler)", ylabel="VI")
+	# p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC($sampler)", ylabel="VI")
+	# display(p4)
+	# p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC($sampler)", ylabel="VI")
 	# xlims!(p3, 0.40, 0.50)
 	# ylims!(p3, 0.40, 0.50)
-	display(p3)
-
+	# display(p3)
 	# p5 = qqplot(vb_x_var, mcmc_x_var, qqline = :R, title="QQ_plot Var", xlabel="VI", ylabel="MCMC($sampler)")
 	# xlims!(p5, 0.40, 0.50)
 	# ylims!(p5, 0.40, 0.50)
@@ -607,8 +600,7 @@ end
 
 # main_graph(111, 100, "nuts")
 
-# main_graph(111, 100, "gibbs")
-
+#main_graph(123, 200, "gibbs")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
