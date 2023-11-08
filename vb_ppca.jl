@@ -40,7 +40,7 @@ begin
 	end
 end
 
-function vb_m(ys, hps::HPP, ss::HSS_PPCA)
+function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	D, T = size(ys)
 	W_C = ss.W_C
 	S_C = ss.S_C
@@ -65,11 +65,11 @@ function vb_m(ys, hps::HPP, ss::HSS_PPCA)
 	catch err
 	    if isa(err, DomainError)
 	        println("--- DomainError occurred: check that a_s and b_s are positive values")
-			println("\ta_s: ", a_s[1])
-			println("\tb_s: ", b_s)
+			# println("\ta_s: ", a_s[1])
+			# println("\tb_s: ", b_s)
 			b_s = abs.(b_s)
-			println("\tTemporary fix: ", b_s)
-			println("Please consider adjusting hyperparameters α, γ, a, b and re-run PPCA ---\n")
+			# println("\tTemporary fix: ", b_s)
+			println("Please consider adjusting hyperparameters γ, a, b and re-run PPCA ---\n")
 
 			q_ρ = Gamma.(a_s, 1 ./ b_s)
 	    else
@@ -169,14 +169,13 @@ function vb_e(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
 end
 
 function update_ab(hpp::HPP, exp_ρ::Vector{Float64}, exp_log_ρ::Vector{Float64})
-    D = length(exp_ρ)
     d = mean(exp_ρ)
     c = mean(exp_log_ρ)
     
     # Update `a` using fixed point iteration
 	a = hpp.a		
 
-    for _ in 1:1000
+    for _ in 1:10
         ψ_a = digamma(a)
         ψ_a_p = trigamma(a)
         
@@ -226,8 +225,8 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 	D, T = size(ys)
 	K = length(hpp.γ)
 	
-	W_C = Matrix{Float64}(T*I, K, K)
-	S_C = Matrix{Float64}(T*I, K, D)
+	W_C = Matrix{Float64}(D*I, K, K)
+	S_C = Matrix{Float64}(D*I, K, D)
 
 	hss = HSS_PPCA(W_C, S_C)
 	exp_np = missing
@@ -449,7 +448,22 @@ function main()
 	k_elbo_p3(y)
 end
 
-main()
+# for MNIST data
+function vb_ppca_k2(y::Matrix{Float64}, hp_optim=false)
+	γ = ones(2) .* 100
+	a = 0.05
+	b = 200
+	μ_0 = zeros(2)
+	Σ_0 = Matrix{Float64}(I, 2, 2)
+	hpp = HPP(γ, a, b, μ_0, Σ_0)
+
+	# early stop 
+	@time exp_np, _ = vb_ppca_c(y, hpp, hp_optim, 100)
+	show(stdout, "text/plain", exp_np.C)
+	return exp_np.C
+end
+
+#main()
 
 #out_txt(500)
 
