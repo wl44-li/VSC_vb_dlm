@@ -1,5 +1,6 @@
 include("kl_optim.jl")
 include("turing_ll.jl")
+include("test_data.jl")
 begin
 	using Distributions, Random
 	using LinearAlgebra
@@ -85,8 +86,9 @@ end
 
 function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	T = length(y)
+
 	m_0 = 0.0  # Prior mean for the states
-	c_0 = 1.0  # Prior precision for the states
+	c_0 = 1e7  
 	
 	α = 0.5  # Shape for Inverse-Gamma prior
 	β = 0.5  # Scale for Inverse-Gamma prior
@@ -211,102 +213,83 @@ end
 
 function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     T = length(y)
-    μ_f = zeros(T)
-    σ_f2 = zeros(T)
-	fs = zeros(T)
-	ss = zeros(T)
 	
-	a_1 = a * priors.μ_0
-	r_1 = a^2 * priors.σ_0 + 1/E_τ_q
-	f_1 = c * a_1
-	s_1 = c^2 * r_1 + 1/E_τ_r
-	fs[1] = f_1
-	ss[1] = s_1
+	#filter state
+    μ_f = zeros(T+1)
+    σ_f = zeros(T+1)
+
+	#filter preds
+	a_s = zeros(T)
+	rs = zeros(T)
 	
-	μ_f[1] = a_1 + r_1 * c * (1/s_1) * (y[1] - f_1)
-    σ_f2[1] = r_1 - r_1^2 * c^2 * (1/s_1)
-	
-    for t = 2:T
-        # Predict step
-        μ_pred = a * μ_f[t-1]
-        σ_pred2 = a^2 * σ_f2[t-1] + 1/E_τ_q
+	μ_f[1] = priors.μ_0
+	σ_f[1] = priors.σ_0
 
-		f_t = c * μ_pred
-		s_t = c^2 * σ_pred2 + 1/E_τ_r
+	log_z = 0.0
 
-		fs[t] = f_t
-		ss[t] = s_t
+    for t in 1:T
+        a_s[t] = a_t = a * μ_f[t]
+        rs[t] = r_t = a * σ_f[t] * a + 1/E_τ_q # Q
 
-		μ_f[t] = μ_pred + σ_pred2 * c * (1/s_t) * (y[t] - f_t)
-		σ_f2[t] = σ_pred2 - σ_pred2^2 * c^2 * (1/s_t)
-        # Update step
-        #K_t = σ_pred2 / (σ_pred2 + 1/E_τ_r)
-        #μ_f[t] = μ_pred + K_t * (y[t] - μ_pred)
-        #σ_f2[t] = (1 - K_t) * σ_pred2
+		f_t = c * a_t
+		q_t = c * r_t * c + 1/E_τ_r # R
+
+		log_z += logpdf(Normal(f_t, sqrt(q_t)), y[t])
+
+		# m_t, C_t Kalman Filter
+		μ_f[t+1] = a_t + r_t * c * (1/q_t) * (y[t] - f_t)
+		σ_f[t+1] = r_t - r_t * c * (1/q_t) * c * r_t
     end
-
-	# dlm pg53. beale p175
-	log_z = sum(logpdf(Normal(fs[i], sqrt(ss[i])), y[i]) for i in 1:T)
 	
-    return μ_f, σ_f2, fs, ss, log_z
+    return μ_f, σ_f, a_s, rs, log_z
 end
 
-function backward_ll(μ_f, σ_f2, E_τ_q, priors::Priors_ll)
-    T = length(μ_f)
+function backward_ll(a, μ_f, σ_f, a_s, rs)
+    T = length(μ_f) - 1
+	
     μ_s = similar(μ_f)
-    σ_s2 = similar(σ_f2)
-    σ_s2_cross = zeros(T)
-    μ_s[T] = μ_f[T]
-    σ_s2[T] = σ_f2[T]
-    for t = T-1:-1:1
-        # Compute the gain J_t
-        J_t = σ_f2[t] / (σ_f2[t] + 1/E_τ_q)
+    σ_s = similar(σ_f)
+    σ_s_cross = zeros(T)
 
-        # Update the smoothed mean μ_s and variance σ_s2
-        μ_s[t] = μ_f[t] + J_t * (μ_s[t+1] - μ_f[t])
-        σ_s2[t] = σ_f2[t] + J_t^2 * (σ_s2[t+1] - σ_f2[t] - 1/E_τ_q)
+    μ_s[end] = μ_f[end]
+    σ_s[end] = σ_f[end]
 
-        # Compute the cross variance σ_s2_cross
-        σ_s2_cross[t+1] = J_t * σ_s2[t+1]
+    for t in T:-1:1 #s_t, S_t, Kalman Smoother
+		μ_s[t] = μ_f[t] + σ_f[t] * a * (1/rs[t]) * (μ_s[t+1] - a_s[t])
+		σ_s[t] = σ_f[t] - σ_f[t] * a * (1/rs[t]) * (rs[t] - σ_s[t+1]) * (1/rs[t]) * a * σ_f[t]
+
+		σ_t_ = 1 / (( 1 / σ_f[t] ) + a*a )
+		σ_s_cross[t] =  σ_t_ * a * σ_s[t+1]
     end
 	
-    #J_0 = σ_f2[1] / (σ_f2[1] + 1/E_τ_q)
-	J_0 = 1.0 / (1.0 + 1/E_τ_q)
-
-	μ_s0 = priors.μ_0 + J_0 * (μ_s[1] - priors.μ_0)
-	σ_s0 = priors.σ_0 + J_0^2 * (σ_s2[1] - priors.σ_0 - 1/E_τ_q)
-	
-	σ_s2_cross[1] = J_0 * σ_s2[1]
-    return μ_s, σ_s2, μ_s0, σ_s0, σ_s2_cross
+    return μ_s, σ_s, σ_s_cross
 end
 
-function vb_e_ll(y, E_τ_r, E_τ_q, priors::Priors_ll)
+function vb_e_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     # Forward pass (filter)
-    μs_f, σs_f2, _, _ , log_Z = forward_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, priors)
+    μs_f, σs_f, a_s, rs, log_Z = forward_ll(y, a, c, E_τ_r, E_τ_q, priors)
 
     # Backward pass (smoother)
-    μs_s, σs_s2, μs_0, σs_s0, σs_s2_cross = backward_ll(μs_f, σs_f2, E_τ_q, priors)
+    μs_s, σs_s, σs_s_cross = backward_ll(a, μs_f, σs_f, a_s, rs)
 
     # Compute the sufficient statistics
-    w_c = sum(σs_s2 .+ μs_s.^2)
-    w_a = sum(σs_s2[1:end-1] .+ μs_s[1:end-1].^2)
-	w_a += σs_s0 + μs_0^2
-	
-    s_c = sum(y .* μs_s)
-    s_a = sum(σs_s2_cross[1:end-1]) + sum(μs_s[1:end-1] .* μs_s[2:end])
-	s_a += μs_0 * μs_s[1]
+    w_c = sum(σs_s[2:end] .+ μs_s[2:end].^2)
+    w_a = sum(σs_s[1:end-1] .+ μs_s[1:end-1].^2)
+    s_c = sum(y .* μs_s[2:end])
+    s_a = sum(σs_s_cross) + sum(μs_s[1:end-1] .* μs_s[2:end])
+
     # Return the sufficient statistics in a HSS struct
-    return HSS_ll(w_c, w_a, s_c, s_a), μs_0, σs_s0, log_Z
+    return HSS_ll(w_c, w_a, s_c, s_a), μs_s[1], σs_s[1], log_Z
 end
 
 function vb_ll(y::Vector{Float64}, hpp::Priors_ll, max_iter=100)
 	hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 	E_τ_r, E_τ_q  = missing, missing
 	
-	for i in 1:max_iter
+	for _ in 1:max_iter
 		E_τ_r, E_τ_q, _ = vb_m_ll(y, hss, hpp)
 				
-		hss, _, _, _ = vb_e_ll(y, E_τ_r, E_τ_q, hpp)
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, hpp)
 	end
 
 	return 1/E_τ_r, 1/E_τ_q
@@ -358,9 +341,10 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
 	qθ = missing
+
 	for i in 1:max_iter
-		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)
-		hss, μs_0, σs_s0, log_z = vb_e_ll(y, E_τ_r, E_τ_q, hpp)
+		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)		
+		hss, μs_0, σs_s0, log_z = vb_e_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, hpp)
 
 		kl_ga = kl_gamma(hpp.α_r, hpp.β_r, qθ.α_r_p, qθ.β_r_p) + kl_gamma(hpp.α_q, hpp.β_q, qθ.α_q_p, qθ.β_q_p)
 		elbo = log_z - kl_ga
@@ -447,7 +431,7 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 	println("\nMLE Filtered MSE, MAD: ", filter_err)
 	println("MLE Smoother MSE, MAD: ", smooth_err)
 	
-	hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+	hpp_ll = Priors_ll(0.01, 0.01, 0.01, 0.01, 0.0, 1.0)
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
 	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim)
@@ -457,13 +441,17 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 		display(p)
 	end
 
-	μs_f, σs_f2, _, _, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
-	μs_s, σs_s, _ = backward_ll(μs_f, σs_f2, 1/q, hpp_ll)
+	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs)
+	
 	x_std = sqrt.(σs_s)
+
+	p = plot(x_std, label = "", title="VI x std")
+	display(p)
 
 	println("\nVB q(r) mode: ", r)
 	println("VB q(q) mode: ", q)
-	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s))
+	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
 
 	if show_plot
 		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
@@ -491,7 +479,7 @@ function test(T=200)
 
 	Xs = zeros(T, 5000)
 	for iter in 1:5000
-		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1.0)
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
 		Xs[:, iter] = xs[2:end]
 	end
 
@@ -508,6 +496,27 @@ end
 # test(20)
 # test(100)
 # test(200)
+
+function test_nile()
+	R = 15099.8
+	Q = 1468.4
+	y = get_Nile()
+	y = vec(y)
+	T = length(y)
+	Xs = zeros(T, 1000)
+	for iter in 1:1000
+
+		# DLM with R set c_0 to 1e7
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 10000000)
+		Xs[:, iter] = xs[2:end]
+	end
+
+	x_std = std(Xs, dims=2)[:]
+	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
+	display(p)
+end
+
+# test_nile()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -576,31 +585,20 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(plot_r)
 	display(plot_q)
 
-	p = compare_mcmc_vi(mcmc_x_m, vb_x_m)
+	p = compare_mcmc_vi(mcmc_x_m, vb_x_m[2:end])
 	title!(p, "Latent X inference mean")
 	xlabel!(p, "MCMC($sampler)")
 	display(p)
 
-	p2 = compare_mcmc_vi(mcmc_x_std, vb_x_std)
+	p2 = compare_mcmc_vi(mcmc_x_std, vb_x_std[2:end])
 	title!(p2, "Latent X std")
 	xlabel!(p2, "MCMC($sampler)")
 	display(p2)
-
-	# p4 = qqplot(mcmc_x_m, vb_x_m, qqline = :R, title="QQ_plot Mean", xlabel="MCMC($sampler)", ylabel="VI")
-	# display(p4)
-	# p3 = qqplot(mcmc_x_var, vb_x_var, qqline = :R, title="QQ_plot Var", xlabel="MCMC($sampler)", ylabel="VI")
-	# xlims!(p3, 0.40, 0.50)
-	# ylims!(p3, 0.40, 0.50)
-	# display(p3)
-	# p5 = qqplot(vb_x_var, mcmc_x_var, qqline = :R, title="QQ_plot Var", xlabel="VI", ylabel="MCMC($sampler)")
-	# xlims!(p5, 0.40, 0.50)
-	# ylims!(p5, 0.40, 0.50)
-	# display(p5)
 end
 
 # main_graph(111, 100, "nuts")
 
-#main_graph(123, 200, "gibbs")
+main_graph(111, 500, "gibbs")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

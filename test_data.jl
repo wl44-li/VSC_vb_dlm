@@ -12,12 +12,12 @@ function load_csv_to_matrix(file_path::String)
     return y
 end
 
-function main()
+function get_Nile()
     # Specify the path to the CSV file (backup)
     # Other dataset available from StateSpaceModels: https://lampspuc.github.io/StateSpaceModels.jl/latest/manual/#Datasets
     file_path = "./_data/Nile.csv"
     y = load_csv_to_matrix(file_path)
-    println(size(y))
+    return y
 end
 
 #main()
