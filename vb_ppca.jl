@@ -222,7 +222,7 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=300)
 end
 
 function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4)
-	D, T = size(ys)
+	D, _ = size(ys)
 	K = length(hpp.γ)
 	
 	W_C = Matrix{Float64}(D*I, K, K)
@@ -231,6 +231,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 	hss = HSS_PPCA(W_C, S_C)
 	exp_np = missing
 	elbo_prev = -Inf
+	el_s = zeros(max_iter)
 
 	# cf. Beal Algorithm 5.3
 	for i in 1:max_iter
@@ -240,8 +241,9 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 		# Convergence check
 		kl_ρ_ = sum([kl_gamma(hpp.a, hpp.b, qθ.a_s, (qθ.b_s)[s]) for s in 1:D])
 		kl_C_ = sum([kl_C(zeros(K), hpp.γ, (qθ.μ_C)[s], qθ.Σ_C, exp_ρ[s]) for s in 1:D])
-			
+		
 		elbo = log_Z_ - kl_ρ_ - kl_C_
+		el_s[i] = elbo
 
 		# Hyper-param learning 
 		if (hpp_learn)
@@ -253,17 +255,19 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 
 		if abs(elbo - elbo_prev) < tol
 			println("--- Stopped at iteration: $i ---")
+			el_s = el_s[1:iter]
             break
 		end
 		
-        elbo_prev = elbo
-
 		if (i == max_iter)
-			println("--- Warning: VB has not necessarily converged at $max_iter iterations ---")
+			println("--- Warning: VB has not necessarily converged at $max_iter iterations, 
+			last elbo difference: $(abs(elbo-elbo_prev)), tolerance: $tol ---")
 		end
+
+		elbo_prev = elbo
 	end
 		
-	return exp_np, elbo_prev
+	return exp_np, elbo_prev, el_s
 end
 
 function test_elbo(sd)
@@ -449,17 +453,19 @@ function main()
 end
 
 # for MNIST data
-function vb_ppca_k2(y::Matrix{Float64}, hp_optim=false)
-	γ = ones(2) .* 100
-	a = 0.05
-	b = 200
+function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
+	γ = ones(2) .* 0.00000001
+	a = 0.5
+	b = 2
 	μ_0 = zeros(2)
 	Σ_0 = Matrix{Float64}(I, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
 	# early stop 
-	@time exp_np, _ = vb_ppca_c(y, hpp, hp_optim, 100)
-	show(stdout, "text/plain", exp_np.C)
+	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter)
+
+	p_el = plot(els, title="PPCA ELBO progression", margin = 5mm)
+	display(p_el)
 	return exp_np.C
 end
 

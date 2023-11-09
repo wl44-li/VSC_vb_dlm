@@ -11,38 +11,16 @@ using Plots
 using StatsBase
 pyplot()
 
-train_y, train_labels = MNIST(split=:train)[:]
-labels = unique(train_labels)
-
-""" Optional:
--- take 1/10 of the trainning data to test quicker
-"""
-# train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
-
-T = size(train_y, 3)
-y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
-
-# Standardise
-y = zscore(y, 1)
-
-# pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
-# M = projection(pca)
-
-# M_ = MultivariateStats.fit(PPCA, y; maxoutdim=2)
-# M = projection(M_)
-
 """DEBUG zero-forcing VB-PPCA
--- package :em, :bayes option will not run
--- package default mle option agrees with standard pca
+- package :em, :bayes option will not run
+- package default mle option agrees with standard pca
 
-Consider reduce EM iterations (early stop),
+Consider reduce EM iterations (early stop before iter 200),
 
-Consider standardise data? (get rid of the 0s from white pixels)
+Consider standardise data? (get rid of the 0s from the white pixels)
 """
-C = vb_ppca_k2(y, true)
-M = svd(C).U
 
-function compareDigits(dA,dB)
+function compareDigits(train_y, train_labels, M, dA, dB)
     imA = train_y[:, :, findall(x -> x == dA, train_labels)]
     imB = train_y[:, :, findall(x -> x == dB, train_labels)]
 
@@ -50,18 +28,97 @@ function compareDigits(dA,dB)
     yB = hcat([vcat(float.(imB[:, :, t])...) for t in 1:size(imB, 3)]...)
 
     xA, xB = M'*yA, M'*yB
-    default(ms=0.8, msw=0, xlims=(-5,12.5), ylims=(-7.5,7.5),
-            legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter(xA[1,:],xA[2,:], c=:red,  label="Digit $(dA)")
+    # default(ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    #         legend = :topright, xlabel="PC 1", ylabel="PC 2")
+    scatter(xA[1,:],xA[2,:], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    legend = :topright, xlabel="PC 1", ylabel="PC 2")
     scatter!(xB[1,:],xB[2,:], c=:blue, label="Digit $(dB)")
 end
 
-plots = []
+function test_MNIST(test_prop=100, standardise = true, method = "pca")
+    train_y, train_labels = MNIST(split=:train)[:]
 
-for k in 1:5
-    push!(plots,compareDigits(2k-2,2k-1))
+    T = length(train_labels)
+    
+    """ Optional:
+    -- take a proportion of the trainning data to test quicker
+    """
+    test_length = Int.(T * test_prop/100)
+    train_y, train_labels = train_y[:, :, 1:test_length], train_labels[1:test_length]
+    y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:test_length]...)
+
+    if standardise
+        y = zscore(y, 1)
+    end
+
+    plots = []
+    M = missing
+
+    if method == "pca"
+        pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
+        M = projection(pca)
+    end
+
+    if method == "mle"
+        mle = MultivariateStats.fit(PPCA, y; maxoutdim=2)
+        M = projection(mle)
+    end
+
+    """
+    Package PPCA options like :em and :bayes does not run with SingularExcepion
+    despite standarisation
+    """
+    # if method == "em"
+    #     M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
+    #     M = projection(M_em)
+    # end
+
+    # if method == "bayes"
+    #     M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
+    #     M = projection(M_bay)
+    # end
+
+    if method == "vbem"
+        C = vb_ppca_k2(y, true)
+        M = svd(C).U
+    end
+
+    for k in 1:5
+        push!(plots, compareDigits(train_y, train_labels, M, 2k-2,2k-1))
+    end
+
+    p = plot(plots..., size = (1600, 1000), margin = 5mm)
+    title!(p, "$method, $test_prop % data")
+    display(p)
 end
 
-p = plot(plots..., size = (1600, 1000), margin = 5mm)
-title!(p, "PPCA")
-display(p)
+#test_MNIST(50, true, "vbem")
+
+"""
+On-going PPCA-VB DEBUG
+
+- ELBO heading down?
+- prior choices?
+- D = 28 x 28, K = 2
+
+"""
+train_y, train_labels = MNIST(split=:train)[:]
+
+train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
+
+T = size(train_y, 3)
+y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
+
+y = zscore(y, 1)
+
+C = vb_ppca_k2(y, 100, false)
+
+# M = svd(C).U
+
+# plots = []
+
+# for k in 1:5
+#     push!(plots, compareDigits(train_y, train_labels, M, 2k-2,2k-1))
+# end
+
+# plot(plots..., size = (1600, 1000), margin = 10mm)
