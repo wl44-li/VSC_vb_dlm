@@ -30,9 +30,23 @@ function compareDigits(train_y, train_labels, M, dA, dB)
     xA, xB = M'*yA, M'*yB
     # default(ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     #         legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter(xA[1,:],xA[2,:], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    scatter(xA[1,:], xA[2,:], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter!(xB[1,:],xB[2,:], c=:blue, label="Digit $(dB)")
+    scatter!(xB[1,:], xB[2,:], c=:blue, label="Digit $(dB)", ms=0.8, msw=0)
+end
+
+function compare_0(train_y, train_labels, M)
+    img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
+    img_n0 = train_y[:, :, findall(x -> x != 0, train_labels)]
+
+    y0 = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
+    yn0 = hcat([vcat(float.(img_n0[:, :, t])...) for t in 1:size(img_n0, 3)]...)
+
+    x0, xn0 = M'*y0, M'*yn0
+
+    scatter(x0[1,:], x0[2,:], c=:red, label="Digit 0", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    legend = :topright, xlabel="PC 1", ylabel="PC 2")
+    scatter!(xn0[1,:], xn0[2,:], c=:blue, label="Digit {1:9}", ms=0.8, msw=0)
 end
 
 function test_MNIST(test_prop=100, standardise = true, method = "pca")
@@ -79,7 +93,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     # end
 
     if method == "vbem"
-        C = vb_ppca_k2(y, true)
+        C = vb_ppca_k2(y, 500, false)
         M = svd(C).U
     end
 
@@ -92,7 +106,8 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     display(p)
 end
 
-#test_MNIST(50, true, "vbem")
+#test_MNIST(100, true, "vbem")
+#test_MNIST()
 
 """
 On-going PPCA-VB DEBUG
@@ -100,20 +115,24 @@ On-going PPCA-VB DEBUG
 - ELBO heading down?
 - prior choices?
 - D = 28 x 28, K = 2
-
 """
+
 train_y, train_labels = MNIST(split=:train)[:]
 
-train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
+#train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
 
 T = size(train_y, 3)
 y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 
 y = zscore(y, 1)
 
-C = vb_ppca_k2(y, 100, false)
+# pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
+# M = projection(pca)
 
-# M = svd(C).U
+C = vb_ppca_k2(y, 500, false)
+M = svd(C).U
+
+compare_0(train_y, train_labels, M)
 
 # plots = []
 
@@ -121,4 +140,4 @@ C = vb_ppca_k2(y, 100, false)
 #     push!(plots, compareDigits(train_y, train_labels, M, 2k-2,2k-1))
 # end
 
-# plot(plots..., size = (1600, 1000), margin = 10mm)
+# plot(plots..., size = (1600, 1000), margin = 5mm)

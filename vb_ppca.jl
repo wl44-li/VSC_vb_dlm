@@ -454,7 +454,8 @@ end
 
 # for MNIST data
 function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
-	γ = ones(2) .* 0.00000001
+	# γ = ones(2) .* 0.00000001
+	γ = ones(2)
 	a = 0.5
 	b = 2
 	μ_0 = zeros(2)
