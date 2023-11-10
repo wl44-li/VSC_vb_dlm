@@ -162,7 +162,7 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
         x = zeros(K, T+1)
         y = zeros(D, T)
 
-        x[:, 1] = rand(MvNormal(m_0, C_0))
+        x[:, 1] = zeros(K)
 
         for t in 1:T
             if (tr(Q) != 0)
@@ -172,7 +172,7 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
             end
 
             if D == 1
-                y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), sqrt.(R))) # linear growth 
+                y[:, t] = C * x[:, t+1] .+ sqrt(R[1]) * randn() # linear growth 
             else
                 y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), R)) 
             end

@@ -90,12 +90,12 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	m_0 = 0.0  # Prior mean for the states
 	c_0 = 1e7  
 	
-	α = 0.5  # Shape for Inverse-Gamma prior
-	β = 0.5  # Scale for Inverse-Gamma prior
+	α = 2  # Shape for Gamma prior
+	β = 0.0001  # rate for Gamma prior
 	
-	# Initial values for the parameters
-	r = rand(InverseGamma(α, β))
-	q = rand(InverseGamma(α, β))
+	# Initial values for the parameters, akin to dlm with R
+	r = 1.0
+	q = 1.0
 
 	n_samples = Int.(mcmc/thinning)
 	samples_x = zeros(T, n_samples)
@@ -118,7 +118,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
+function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, mcmc, burn_in, thin)
@@ -135,18 +135,26 @@ function test_gibbs_ll(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=fa
 	println()
 	println("R summary stats: ", summary_df_r)
 
-	x_m = mean(s_x, dims=2)[:]
-	println("average x sample error " , error_metrics(x_true[2:end], x_m))
-	
+	x_m = mean(s_x, dims=2)[:]	
 	x_std = std(s_x, dims=2)[:]
-	p = plot(x_std, label = "", title="MCMC x std")
-	display(p)
 
-	# # DEBUG here
-	# p = plot(s_x'[1:end, 1:200], label = "", title="MCMC Trace Plot x[0:T]")
-	# display(p)
+	if x_true !== nothing
+		println("average x sample error " , error_metrics(x_true[2:end], x_m))
+	end
 
 	if show_plot
+		p = plot((s_x[1:end, 1:200]), label = "", title="MCMC Trace Plot x[0:T]")
+		display(p)
+		# Agrees with DLM with R example !
+		p = plot(x_std, label = "", title="MCMC x std")
+		display(p)
+
+		p_q = plot(s_q, title="trace q")
+		display(p_q)
+
+		p_r = plot(s_r, title="trace r")
+		display(p_r)
+
 		p_r = density(R_chain)
 		title!(p_r, "MCMC R")
 		display(p_r)
@@ -335,8 +343,11 @@ function update_ab(hpp::Priors_ll, qθ)
 	return a_r, b_r, a_q, b_q
 end
 
-function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=5e-4)
+function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5)
+	# T = length(y)
+	# hss = HSS_ll(1.0*T, 1.0*T, 1.0*T, 1.0*T)
 	hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
+
 	E_τ_r, E_τ_q  = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
@@ -417,21 +428,13 @@ function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
 	return p
 end
 
-function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
-	model = LocalLevel(y)
-	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
-	print_results(model)
+function test_vb_ll(y, x_true = nothing, hyperoptim = false, show_plot = false)
 
-	fm = get_filtered_state(model)
-	filter_err = error_metrics(x_true[2:end], fm)
+	"""
+	*** Prior choice and initilisation of VB
+	"""
+	hpp_ll = Priors_ll(2, 0.001, 2, 0.001, 0.0, 1e7)
 
-	sm = get_smoothed_state(model)
-	smooth_err = error_metrics(x_true[2:end], sm)
-
-	println("\nMLE Filtered MSE, MAD: ", filter_err)
-	println("MLE Smoother MSE, MAD: ", smooth_err)
-	
-	hpp_ll = Priors_ll(0.01, 0.01, 0.01, 0.01, 0.0, 1.0)
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
 	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim)
@@ -443,7 +446,6 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs)
-	
 	x_std = sqrt.(σs_s)
 
 	p = plot(x_std, label = "", title="VI x std")
@@ -451,7 +453,10 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 
 	println("\nVB q(r) mode: ", r)
 	println("VB q(q) mode: ", q)
-	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+
+	if x_true !== nothing
+		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+	end
 
 	if show_plot
 		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
@@ -461,13 +466,26 @@ function test_vb_ll(y, x_true, hyperoptim = false, show_plot = false)
 		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
-	# to compare with MCMC
 	return μs_s, x_std, q_rq
 end
 
-"""
-On-going FFBS debug
-"""
+function test_MLE(y, x_true = nothing)
+	model = LocalLevel(y)
+	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
+	print_results(model)
+
+	if x_true !== nothing
+		fm = get_filtered_state(model)
+		sm = get_smoothed_state(model)
+
+		filter_err = error_metrics(x_true[2:end], fm)
+		smooth_err = error_metrics(x_true[2:end], sm)
+
+		println("\nMLE Filtered MSE, MAD: ", filter_err)
+		println("MLE Smoother MSE, MAD: ", smooth_err)
+	end
+end
+
 function test(T=200)
 	println("Running experiments for local level model (with graphs):\n")
 	R = 1.0
@@ -502,21 +520,31 @@ function test_nile()
 	Q = 1468.4
 	y = get_Nile()
 	y = vec(y)
+	y = Float64.(y)
 	T = length(y)
+
+	Random.seed!(111)
+
 	Xs = zeros(T, 1000)
 	for iter in 1:1000
-
 		# DLM with R set c_0 to 1e7
-		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 10000000)
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
 		Xs[:, iter] = xs[2:end]
 	end
 
+	# Agrees with DLM with R!
 	x_std = std(Xs, dims=2)[:]
 	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
 	display(p)
+
+	test_gibbs_ll(y, nothing, 3000, 0, 1)
+	test_MLE(y)
+
+	# Not good with real-world datasets, think...
+	test_vb_ll(y, nothing, true)
 end
 
-# test_nile()
+#test_nile()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -598,17 +626,14 @@ end
 
 # main_graph(111, 100, "nuts")
 
-main_graph(111, 500, "gibbs")
+main_graph(123, 500, "gibbs")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 
-	# Open a file for writing
 	open(file_name, "w") do f
-		# Redirect standard output and standard error to the file
 		redirect_stdout(f) do
 			redirect_stderr(f) do
-				# Your script code here
 				main(n)
 			end
 		end
