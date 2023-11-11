@@ -156,15 +156,20 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
 		end
 		return y, x
 
-    else
+    else """
+            Debug Gen_function for multi-variate case !!!
+         """
+
         K, _ = size(A)
         D, _ = size(C)
         x = zeros(K, T+1)
         y = zeros(D, T)
 
-        x[:, 1] = zeros(K)
+        x[:, 1] = m_0
+        x[:, 2] = rand(MvNormal(A*m_0, A'*C_0*A + Q))
+        y[:, 1] = C * x[:, 2] + rand(MvNormal(zeros(D), R)) 
 
-        for t in 1:T
+        for t in 2:T
             if (tr(Q) != 0)
                 x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
             else

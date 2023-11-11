@@ -46,43 +46,49 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 		
 		# Update
 		f_t = C * a_t
-		S_t = C * R_t * C' + R #V
+		Q_t = C * R_t * C' + R #V
 
 		# filter 
-		ms[:, t+1] = a_t + R_t * C' * inv(S_t) * (Ys[:, t] - f_t)
-		Cs[:, :, t+1]= R_t - R_t * C' * inv(S_t) * C * R_t
+		ms[:, t+1] = a_t + R_t * C' * inv(Q_t) * (Ys[:, t] - f_t)
+		Cs[:, :, t+1]= R_t - R_t * C' * inv(Q_t) * C * R_t
 	end
 	return ms, Cs, a_s, Rs
 end
 
-function ffbs_x(Ys, A, C, R, Q, m_0, P_0)
+function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	K, _ = size(A)
 	_, T = size(Ys)
 
-	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, P_0)
+	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
-	# DEBUG FFBS
 	try
 		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	catch PosDefException
-		println("Pathology case encountered at iteration $n: ")
+		println("Pathology case encountered at t=$T: ")
 		println("C_end: ")
 		println(Cs[:, :, end])
-		println("Y_end:")
-		println(Ys[:, end])
+		# println("Y_end:")
+		# println(Ys[:, end])
 	end
 
-	# backward sampling
+	# Backward Sampling (h_t, H_t)
 	for t in T:-1:1
 		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
-		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+
+		try
+			X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+		catch PosDefException
+			println("Pathology case encountered at t=$t: ")
+			println("H_t: ")
+			println(H_t)
+		end
 	end
 	return X
 end
 
-# Multi-variate DLM with full unknown $R, Q$
+# Multi-variate DLM with full R
 function sample_R_(y, x, C, v_0, S_0)
     T = size(y, 2)
 	
@@ -97,52 +103,59 @@ function sample_R_(y, x, C, v_0, S_0)
     return inv(R⁻¹)
 end
 
-# not-yet used 
-# function sample_Q_(x, A, v_1, S_1, x_0)
-#     T = size(x, 2)
-	
-#     residuals = [x[:, t] - A * x[:, t-1] for t in 2:T]
-# 	SS_1 = sum([residuals[t] * residuals[t]' for t in 1:T-1])
-#     scale_posterior = S_1 + SS_1 .* 0.5
+function test_full_R(sd, T = 100)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	Q = Diagonal([1.0, 1.0])
+	R = [2.0 0.5; 0.5 4.0] # Full-cov R
 
-# 	scale_posterior += (x[:, 1] - A * x_0) * (x[:, 1] - A * x_0)' .* 0.5
-#     v_p = v_1 + 0.5 * T
-# 	S_p = PDMat(Symmetric(inv(scale_posterior)))
+	println("R True:")
+	show(stdout, "text/plain", R)
+	println()
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(sd)
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
 
-# 	Q⁻¹ = rand(Wishart(v_p, S_p))
-#     return inv(Q⁻¹)
-# end
+	P, T = size(y)
+	v_0 = P
+	S_0 = Matrix{Float64}(I * 0.01, P, P)
+	R = sample_R_(y, x_true, C, v_0, S_0)
+	println("\nR Sample", R)
+end
 
-function gibbs_dlm_cov(y, A, C, mcmc=3000, burn_in=1500, thinning=1, debug=false)
+test_full_R(10, 100)
+println()
+test_full_R(10, 3000)
+
+function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
 	m_0 = zeros(K)
-	C_0 = Matrix{Float64}(I, K, K)
+	C_0 = Matrix{Float64}(I .* 1e7, K, K)
 	
 	v_0 = P + 1.0 
 	S_0 = Matrix{Float64}(0.01 * I, P, P)
+	# R⁻¹ = rand(Wishart(v_0, inv(S_0)))
+	# R = inv(R⁻¹)
+	R = Diagonal(ones(P))
 
-	# Initial values for the parameters
-	R⁻¹ = rand(Wishart(v_0, inv(S_0)))
-	R = inv(R⁻¹)
-
-	# DEBUG: hyper-prior [Pathological Gamma(0.01, 0.01)]
 	"""
+	DEBUG: hyper-prior [Pathological Gamma(0.01, 0.01)]
 	α <= 1 the mode is at 0, otherwise the mode is away from 0
 	when β (rate, inverse-scale) decreases, horizontal scale decreases, squeeze left and up
 	"""
-	α, β = 100, 100
-	ρ_q = rand(Gamma(α, β), K)
-    Q = Diagonal(1 ./ ρ_q)
+	# α, β = 2, 0.5
+	# ρ_q = rand(Gamma(α, β), K) 
+    # Q = Diagonal(1 ./ ρ_q) # inverse precision is var
+    Q = Diagonal(ones(K))
 	
 	n_samples = Int.(mcmc/thinning)
-	# Store the samples
 	samples_X = zeros(n_samples, K, T)
 	samples_Q = zeros(n_samples, K, K)
 	samples_R = zeros(n_samples, P, P)
 	
-	# Gibbs sampler
 	for i in 1:mcmc+burn_in
 		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
 		x = x[:, 2:end]
@@ -172,7 +185,7 @@ begin
 	    a::Float64
 	   	b::Float64
 	    μ_0::Array{Float64, 1}
-	    Λ_0::Array{Float64, 2}
+	    Σ_0::Array{Float64, 2}
 	end
 
 	struct Q_Wishart
@@ -186,15 +199,16 @@ end
 function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float64, 2}, C::Array{Float64, 2})
     _, T = size(y)
     K = size(A, 2) 
-    # Compute the new parameters for the variational posterior of Λ_R
+
+	# Wishart posterior
     ν_Rn = prior.ν_R + T
 	W_Rn_inv = inv(prior.W_R) + y*y' - hss.S_C * C' - C * hss.S_C' + C * hss.W_C * C'
     
-    # Compute the new parameters for the variational posterior of Λ_Q
+	# Gamma posterior
     H = hss.W_C - hss.S_A * A' - A * hss.S_A' + A * hss.W_A * A'
 	a_ = prior.a + 0.5 * T
-	a_s = a_ * ones(K)
-    b_s = [prior.b + 0.5 * H[i, i] for i in 1:K]
+	a_s = a_ * ones(K) # shape
+    b_s = [prior.b + 0.5 * H[i, i] for i in 1:K] # rate
 	q_𝛐 = Gamma.(a_s, 1 ./ b_s)	
 	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 
@@ -202,103 +216,65 @@ function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float6
 	return W_Rn_inv ./ ν_Rn, Exp_Q⁻¹, Q_Wishart(ν_Rn, inv(W_Rn_inv), a_, b_s)
 end
 
-function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior::Prior)
+function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, μ_0, Σ_0)
     _, T = size(y)
     K = size(A, 1)
-    
-    # Unpack the prior parameters
-    μ_0, Λ_0 = prior.μ_0, prior.Λ_0
-    
-    # Initialize the filtered means and covariances
-    μ_f = zeros(K, T)
-    Σ_f = zeros(K, K, T)
-    f_s = zeros(K, T)
-	S_s = zeros(K, K, T)
-    # Set the initial filtered mean and covariance to their prior values
-	A_1 = A * μ_0
-	R_1 = A * inv(Λ_0) * A' + E_Q
-	
-	f_1 = C * A_1
-	S_1 = C * R_1 * C' + E_R
-	f_s[:, 1] = f_1
-	S_s[:, :, 1] = S_1
-	
-    μ_f[:, 1] = A_1 + R_1 * C'* inv(S_1) * (y[:, 1] - f_1)
-    Σ_f[:, :, 1] = R_1 - R_1*C'*inv(S_1)*C*R_1 
-    
-    # Forward pass (kalman filter)
-    for t = 2:T
-        # Predicted state mean and covariance
-        μ_p = A * μ_f[:, t-1]
-        Σ_p = A * Σ_f[:, :, t-1] * A' + E_Q
+        
+    μ_f = zeros(K, T+1)
+    Σ_f = zeros(K, K, T+1)
+    A_s = zeros(K, T)
+	R_s = zeros(K, K, T)
+	μ_f[:, 1], Σ_f[:, :, 1] = μ_0, Σ_0
+
+	log_Z = 0.0
+    for t in 1:T # Forward pass (Kalman Filter)
+        A_s[:, t] = A_t = A * μ_f[:, t]
+        R_s[:, :, t] = R_t = A * Σ_f[:, :, t] * A' + E_Q
 
 		# marginal y - normalization
-		f_t = C * μ_p
-		S_t = C * Σ_p * C' + E_R
-		f_s[:, t] = f_t
-		S_s[:, :, t] = S_t
-		
-		# Filtered state mean and covariance (2.8a - 2.8c DLM with R)
-		μ_f[:, t] = μ_p + Σ_p * C' * inv(S_t) * (y[:, t] - f_t)
-		Σ_f[:, :, t] = Σ_p - Σ_p * C' * inv(S_t) * C * Σ_p
-			
-		# Kalman gain
-        #K_t = Σ_p * C' / (C * Σ_p * C' + E_R)
-        #μ_f[:, t] = μ_p + K_t * (y[:, t] - C * μ_p)
-        #Σ_f[:, :, t] = (I - K_t * C) * Σ_p
+		f_t = C * A_t
+		Q_t = C * R_t * C' + E_R
+		log_Z += logpdf(MvNormal(f_t, Symmetric(Q_t)), y[:, t])
+
+		μ_f[:, t] = A_t + R_t * C' * inv(Q_t) * (y[:, t] - f_t)
+		Σ_f[:, :, t] = R_t - R_t * C' * inv(Q_t) * C * R_t
     end
 	
-    log_z = sum(logpdf(MvNormal(f_s[:, i], Symmetric(S_s[:, :, i])), y[:, i]) for i in 1:T)
-    return μ_f, Σ_f, log_z
+    return μ_f, Σ_f, A_s, R_s, log_Z
 end
 
-function backward_(μ_f::Array{Float64, 2}, Σ_f::Array{Float64, 3}, A::Array{Float64, 2}, E_Q::Array{Float64, 2})
-    K, T = size(μ_f)
-    
-    # Initialize the smoothed means, covariances, and cross-covariances
-    μ_s = zeros(K, T)
-    Σ_s = zeros(K, K, T)
+function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Float64, 3}, A_s, R_s)
+    K, T = size(A_s)
+    μ_s = zeros(K, T+1)
+    Σ_s = zeros(K, K, T+1)
     Σ_s_cross = zeros(K, K, T)
     
-    # Set the final smoothed mean and covariance to their filtered values
-    μ_s[:, T] = μ_f[:, T]
-    Σ_s[:, :, T] = Σ_f[:, :, T]
+    # Set the final (t=T) smoothed mean and co-variance to filtered values
+    μ_s[:, end], Σ_s[:, :, end] = μ_f[:, end], Σ_f[:, :, end]
     
-    # Backward pass
-    for t = T-1:-1:1
-        # Compute the gain J_t
-        J_t = Σ_f[:, :, t] * A' / (A * Σ_f[:, :, t] * A' + E_Q)
+    for t in T:-1:1  # Backward pass, Kalman Smoother (s_t, S_t)
+		μ_s[:, t] = μ_f[:, t] + Σ_f[:, :, t] * A' * inv(R_s[:, :, t]) * (μ_s[:, t+1] - A_s[:, t])
+		Σ_s[:, :, t] = Σ_f[:, :, t] - Σ_f[:, :, t] * A' * inv(R_s[:, :, t]) * (R_s[:, :, t] - Σ_s[:, :, t+1]) * inv(R_s[:, :, t]) * A * Σ_f[:, :, t]
 
-        # Update the smoothed mean μ_s and covariance Σ_s
-        μ_s[:, t] = μ_f[:, t] + J_t * (μ_s[:, t+1] - A * μ_f[:, t])
-        Σ_s[:, :, t] = Σ_f[:, :, t] + J_t * (Σ_s[:, :, t+1] - A * Σ_f[:, :, t] * A' - E_Q) * J_t'
-
-        # Compute the cross covariance Σ_s_cross
-        #Σ_s_cross[:, :, t+1] = inv(inv(Σ_f[:, :, t]) + A'*A) * A' * Σ_s[:, :, t+1]
-		Σ_s_cross[:, :, t+1] = J_t * Σ_s[:, :, t+1]
+		Σ_t_ = inv(inv(Σ_f[:, :, t]) + A'*A)
+		Σ_s_cross[:, :, t] = Σ_t_ * A' * Σ_s[:, :, t]
     end
 	
-	Σ_s_cross[:, :, 1] = inv(I + A'*A) * A' * Σ_s[:, :, 1]
-	#J_1 = I * A' / (A * I * A' + E_Q)
-	#Σ_s_cross[:, :, 1] = J_1 * Σ_s[:, :, 1]
     return μ_s, Σ_s, Σ_s_cross
 end
 
 function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior::Prior)
-    # Run the forward pass
-    μ_f, Σ_f, log_Z = forward_(y, A, C, E_R, E_Q, prior)
+	# Forward-Backward
+	μ_f, Σ_f, A_s, R_s, log_Z = forward_(y, A, C, E_R, E_Q, prior.μ_0, prior.Σ_0)
+    μ_s, Σ_s, Σ_s_cross = backward_(A, μ_f, Σ_f, A_s, R_s)
 
-    # Run the backward pass
-    μ_s, Σ_s, Σ_s_cross = backward_(μ_f, Σ_f, A, E_Q)
-
-    # Compute the hidden state sufficient statistics
-    W_C = sum(Σ_s, dims=3)[:, :, 1] + μ_s * μ_s'
+    # Compute the hidden state sufficient statistics [ Beale 5.3, page 183 ]
+    W_C = sum(Σ_s[:, :, 2:end], dims=3)[:, :, 1] + μ_s[:, 2:end] * μ_s[:, 2:end]'
     W_A = sum(Σ_s[:, :, 1:end-1], dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 1:end-1]'
-    #S_C = y * μ_s'
-	S_C = μ_s * y'
+	S_C = μ_s[:, 2:end] * y'
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
 
-	# Return the hidden state sufficient statistics
+	# Return hidden state sufficient statistics
     return HSS(W_C, W_A, S_C, S_A), log_Z
 end
 
@@ -317,7 +293,7 @@ function vbem_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2},
 end
 
 function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=100)
-    P, T = size(y)
+    P, _ = size(y)
     K, _ = size(A)
 
     W_C = zeros(K, K)
@@ -360,7 +336,6 @@ function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Floa
     savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 end
 
-# With Convergence Check
 function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=5e-3)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	K = size(A, 2)
@@ -370,7 +345,6 @@ function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}
 
 	for i in 1:max_iter
 		E_R, E_Q, Q_Wi = vb_m_step(y, hss, prior, A, C)
-				
 		hss, log_Z = vb_e_step(y, A, C, E_R, E_Q, prior)
 
 		kl_Wi = kl_Wishart(Q_Wi.ν_R_q, Q_Wi.W_R_q, prior.ν_R, prior.W_R)
@@ -398,15 +372,14 @@ end
 function vb_m_diag(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float64, 2})
     D, T = size(y)
     K = size(A, 1)
-    # Compute the new parameters for the variational posterior of Λ_R
+
 	G = y*y' - hss.S_C * C' - C * hss.S_C' + C * hss.W_C * C'
     a_ = hpp.a + 0.5 * T
-	a_s = a_ * ones(D)
-    b_s = [hpp.b + 0.5 * G[i, i] for i in 1:D]
-	q_ρ = Gamma.(a_s, 1 ./ b_s)
+	a_s = a_ * ones(D) # shape
+    b_s = [hpp.b + 0.5 * G[i, i] for i in 1:D] # rate
+	q_ρ = Gamma.(a_s, 1 ./ b_s) # Julia Gamma: param (shape, scale) (1/rate)
 	Exp_R⁻¹ = diagm(mean.(q_ρ))
 	
-    # Compute the new parameters for the variational posterior of Λ_Q
     H = hss.W_C - hss.S_A * A' - A * hss.S_A' + A * hss.W_A * A'
 	α_ = hpp.α + 0.5 * T
 	α_s = α_ * ones(K)
@@ -417,115 +390,21 @@ function vb_m_diag(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float
 	return Exp_R⁻¹, Exp_Q⁻¹, Q_Gamma(a_, b_s, α_, β_s)
 end
 
-function forward_v(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prior::HPP_D)
-    P, T = size(y)
-    K = size(A, 1)
-    
-    # Unpack the prior parameters
-    μ_0, Λ_0 = prior.μ_0, prior.Σ_0
-    
-    # Initialize the filtered means and covariances
-    μ_f = zeros(K, T)
-    Σ_f = zeros(K, K, T)
+function vb_e_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prior::HPP_D)
+    μ_f, Σ_f, A_s, R_s, log_Z = forward_(y, A, C, E_R, E_Q, prior.μ_0, prior.Σ_0)
+    μ_s, Σ_s, Σ_s_cross = backward_(A, μ_f, Σ_f, A_s, R_s)
 
-    f_s = zeros(P, T)
-	S_s = zeros(P, P, T)
-	
-    # Set the initial filtered mean and covariance to their prior values
-	A_1 = A * μ_0
-	R_1 = A * inv(Λ_0) * A' + E_Q
-	
-	f_1 = C * A_1
-	S_1 = C * R_1 * C' + E_R
-	f_s[:, 1] = f_1
-	S_s[:, :, 1] = S_1
-	
-    μ_f[:, 1] = A_1 + R_1 * C'* inv(S_1) * (y[:, 1] - f_1)
-    Σ_f[:, :, 1] = R_1 - R_1*C'*inv(S_1)*C*R_1 
-    
-    # Forward pass (kalman filter)
-    for t = 2:T
-        # Predicted state mean and covariance
-        μ_p = A * μ_f[:, t-1]
-        Σ_p = A * Σ_f[:, :, t-1] * A' + E_Q
-
-		# marginal y - normalization
-		f_t = C * μ_p
-		S_t = C * Σ_p * C' + E_R
-		f_s[:, t] = f_t
-		S_s[:, :, t] = S_t
-		
-		# Filtered state mean and covariance (2.8a - 2.8c DLM with R)
-		μ_f[:, t] = μ_p + Σ_p * C' * inv(S_t) * (y[:, t] - f_t)
-		Σ_f[:, :, t] = Σ_p - Σ_p * C' * inv(S_t) * C * Σ_p
-			
-		# Kalman gain
-        #K_t = Σ_p * C' / (C * Σ_p * C' + E_R)
-        #μ_f[:, t] = μ_p + K_t * (y[:, t] - C * μ_p)
-        #Σ_f[:, :, t] = (I - K_t * C) * Σ_p
-    end
-	
-    log_z = sum(logpdf(MvNormal(f_s[:, i], Symmetric(S_s[:, :, i])), y[:, i]) for i in 1:T)
-    return μ_f, Σ_f, log_z
-end
-
-function backward_v(μ_f::Array{Float64, 2}, Σ_f::Array{Float64, 3}, A::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior)
-    K, T = size(μ_f)
-    
-    # Initialize the smoothed means, covariances, and cross-covariances
-    μ_s = zeros(K, T)
-    Σ_s = zeros(K, K, T)
-    Σ_s_cross = zeros(K, K, T)
-    
-    # Set the final smoothed mean and covariance to their filtered values
-    μ_s[:, T] = μ_f[:, T]
-    Σ_s[:, :, T] = Σ_f[:, :, T]
-    
-    # Backward pass
-    for t = T-1:-1:1
-        # Compute the gain J_t
-        J_t = Σ_f[:, :, t] * A' / (A * Σ_f[:, :, t] * A' + E_Q)
-
-        # Update the smoothed mean μ_s and covariance Σ_s
-        μ_s[:, t] = μ_f[:, t] + J_t * (μ_s[:, t+1] - A * μ_f[:, t])
-        Σ_s[:, :, t] = Σ_f[:, :, t] + J_t * (Σ_s[:, :, t+1] - A * Σ_f[:, :, t] * A' - E_Q) * J_t'
-
-        # Compute the cross covariance Σ_s_cross
-        #Σ_s_cross[:, :, t+1] = inv(inv(Σ_f[:, :, t]) + A'*A) * A' * Σ_s[:, :, t+1]
-		Σ_s_cross[:, :, t+1] = J_t * Σ_s[:, :, t+1]
-    end
-	
-	Σ_s_cross[:, :, 1] = inv(I + A'*A) * A' * Σ_s[:, :, 1]
-	
-	J_0 = prior.Σ_0 * A' / (A * prior.Σ_0 * A' + E_Q)
-	μ_s0 = prior.μ_0 + J_0 * (μ_s[:, 1] -  A * prior.μ_0)
-	Σ_s0 = prior.Σ_0 + J_0 * (Σ_s[:, :, 1] - A * prior.Σ_0 * A' - E_Q) * J_0'
-    return μ_s, Σ_s, μ_s0, Σ_s0, Σ_s_cross
-end
-
-function vb_e_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prior)
-    # Run the forward pass
-    μ_f, Σ_f, log_Z = forward_v(y, A, C, E_R, E_Q, prior)
-
-    # Run the backward pass
-    μ_s, Σ_s, μ_s0, Σ_s0, Σ_s_cross = backward_v(μ_f, Σ_f, A, E_Q, prior)
-
-    # Compute the hidden state sufficient statistics
-    W_C = sum(Σ_s, dims=3)[:, :, 1] + μ_s * μ_s'
+    W_C = sum(Σ_s[:, :, 2:end], dims=3)[:, :, 1] + μ_s[:, 2:end] * μ_s[:, 2:end]'
     W_A = sum(Σ_s[:, :, 1:end-1], dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 1:end-1]'
-	W_A += Σ_s0 + μ_s0*μ_s0'
 	
-    S_C = μ_s * y'
+    S_C = μ_s[:, 2:end] * y'
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
-	S_A += μ_s0*μ_s[:, 1]'
 
-	# Return the hidden state sufficient statistics
-    return HSS(W_C, W_A, S_C, S_A), μ_s0, Σ_s0, log_Z
+    return HSS(W_C, W_A, S_C, S_A), μ_s[:, :, 1], Σ_s[:, :, 1], log_Z
 end
 
 # VBEM with Convergence
 function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=500, tol=1e-3)
-
 	D, _ = size(y)
 	K = size(A, 1)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
@@ -595,64 +474,64 @@ function sample_Q(Xs, A, α_q, β_q)
     return diagm(1 ./ q_sampled)
 end
 
-function test_Gibbs_RQ()
+function test_Gibbs_RQ(sd, T=100)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0])
-	R = Diagonal([0.1, 0.1])
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
-	Random.seed!(123)
-	T = 1000
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
-	prior = Q_Gamma(100, 100, 100, 100)
+	Q = Diagonal([10.0, 8.0])
+	R = Diagonal([1.0, 2.0])
 
-	R = sample_R(x_true, y, C, prior.a, prior.b)
-	Q = sample_Q(x_true, A, prior.α, prior.β)
-
-	println("R:")
+	println("R True:")
 	show(stdout, "text/plain", R)
 	println()
-	println("Q:")
+	println("Q True:")
+	show(stdout, "text/plain", Q)
+	println()
+
+	μ_0 = [0.0, 0.0]
+	Σ_0 = Diagonal([1.0, 1.0])
+	Random.seed!(sd)
+	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	prior = Q_Gamma(2, 0.001, 2, 0.001)
+
+	R = sample_R(x_true[:, 2:end], y, C, prior.a, prior.b)
+	Q = sample_Q(x_true[:, 2:end], A, prior.α, prior.β)
+
+	println("R Sample:")
+	show(stdout, "text/plain", R)
+	println()
+	println("Q Sample:")
 	show(stdout, "text/plain", Q)
 end
+
+# Diagonal R, Q verfied (linear growth simple extension)
+# test_Gibbs_RQ(111, 100)
+# println()
+# test_Gibbs_RQ(111, 1000)
 
 function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
-	
-	m_0 = prior.μ_0
-	P_0 = prior.Σ_0
-	
+	m_0, C_0 = prior.μ_0, prior.Σ_0
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
-	ρ_r = rand(Gamma(a, b), P)
-    R = Diagonal(1 ./ ρ_r)
-
-	ρ_q = rand(Gamma(α, β), K)
-    Q = Diagonal(1 ./ ρ_q)
+	
+    R = Diagonal(ones(P))
+    Q = Diagonal(ones(K))
 
 	n_samples = Int.(mcmc/thinning)
-	# Store the samples
 	samples_X = zeros(n_samples, K, T)
 	samples_Q = zeros(n_samples, K, K)
 	samples_R = zeros(n_samples, P, P)
 	
-	# Gibbs sampler
 	for i in 1:mcmc+burn_in
 		if debug
 			println("MCMC diagonal R, Q debug, iteration : $i")
 		end
-	    # Update the states
-		x = ffbs_x(y, A, C, R, Q, m_0, P_0)
+		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
 		x = x[:, 2:end]
 
-		# Update the system noise
 		Q = sample_Q(x, A, α, β)
-		
-	    # Update the observation noise
 		R = sample_R(x, y, C, a, b)
 	
-	    # Store the samples
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -664,16 +543,16 @@ function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1, 
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
+function test_gibbs_diag(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 	A = [1.0 0.0; 0.0 1.0] 
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
 	D, _ = size(y)
 
-	# DEBUG, slightly different choice of prior
-	prior = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
-
+	# DEBUG, different choices of prior params of Gamma
+	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	n_samples = Int.(mcmc/thin)
+
 	println("--- MCMC Diagonal Covariances ---")
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_diag(y, A, C, prior, mcmc, burn_in, thin)
 	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
@@ -692,14 +571,16 @@ function test_gibbs_diag(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	println("R summary stats: ", summary_df_r)
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
-	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+	if x_true !== nothing
+		println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+	end
 end
 
-function test_vb(y, x_true, hyperoptim = false, show_plot = false)
+function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
-	prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I, K, K))
 	println("--- VB with Diagonal Covariances ---")
 
 	println("\nHyperparam optimisation: $hyperoptim")
@@ -716,14 +597,16 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 	show(stdout, "text/plain", R)
 	println("\n\n VB q(Q): ")
 	show(stdout, "text/plain", Q)
-	μs_f, σs_f2 = forward_v(y, A, C, R, Q, prior)
-	μs_s, _, _ = backward_v(μs_f, σs_f2, A, Q, prior)
-	println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
-	sleep(1)
+	μs_f, σs_f2, A_s, R_s = forward_(y, A, C, R, Q, prior.μ_0, prior.Σ_0)
+	μs_s, _, _ = backward_(A, μs_f, σs_f2, A_s, R_s)
+
+	if x_true !== nothing
+		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+	end
 
 	D, _ = size(y)
-	W_R = Matrix{Float64}(I, D, D)
-	prior = Prior(D + 1.0, W_R, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+	W_R = Matrix{Float64}(I * 0.01, D, D)
+	prior = Prior(D + 1.0, W_R, 2, 0.001, zeros(K), Matrix{Float64}(I, K, K))
 	println("\n--- VB with Full Co-variances R ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
 	println("VB q(R): ")
@@ -738,24 +621,24 @@ function test_vb(y, x_true, hyperoptim = false, show_plot = false)
 		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
-	μs_f, σs_f2 = forward_(y, A, C, R, Q, prior)
-    μs_s, _, _ = backward_(μs_f, σs_f2, A, Q)
-	println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
-	println()
+	μs_f, σs_f2, A_s, R_s = forward_(y, A, C, R, Q, prior.μ_0, prior.Σ_0)
+    μs_s, _, _ = backward_(A, μs_f, σs_f2, A_s, R_s)
+	if x_true !== nothing
+		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+	end
 end
 
-function test_gibbs_cov(y, x_true, mcmc=10000, burn_in=5000, thin=1)
+function test_gibbs_cov(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	D, _ = size(y)
 	K = size(A, 1)
-	
+
 	println("\n--- MCMC : R Full Covariances ---")
 	n_samples = Int.(mcmc/thin)
 	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
 
 	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
-
 	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
 	R_chain = Chains(reshape(Rs_samples, n_samples, D^2))
 
@@ -770,8 +653,9 @@ function test_gibbs_cov(y, x_true, mcmc=10000, burn_in=5000, thin=1)
 	println()
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
-	println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
-	#println("MSE, MAD of MCMC X end: ", error_metrics(x_true, Xs_samples[end, :, :]))
+	if x_true !== nothing
+		println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+	end
 end
 
 function test_data(rnd, max_T = 500)
@@ -814,21 +698,16 @@ end
 
 function out_txt()
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
-
 	open(file_name, "w") do f
 		redirect_stdout(f) do
 			redirect_stderr(f) do
 				com_vb_gibbs()
-				#test_gibbs()
 			end	
 		end
 	end
 end
 
-out_txt()
-"""
-TO-DO: validate posterior comparison mcmc, vi using graphs
-"""
+#out_txt()
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
 # DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

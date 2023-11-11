@@ -35,7 +35,11 @@ function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float
 
 	H = Diagonal([H_11, H_22])
 	β_s = [hpp.β + 0.5 * H[i, i] for i in 1:K]
-	q_𝛐 = Gamma.(α_s, 1 ./ β_s)	
+	q_𝛐 = Gamma.(α_s, 1 ./ β_s)
+
+	"""
+	Q inference needs potential check
+	"""
 	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 	return Exp_R⁻¹, Exp_Q⁻¹, Q_Gamma(a_, b_s, α_, β_s)
 end
@@ -82,7 +86,6 @@ function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Fl
     for t in T:-1:1 # Backward pass (Kalman Smoother)
 		μ_s[:, t] = μ_f[:, t] + Σ_f[:, :, t] * A' * inv(Rs[:, :, t]) * (μ_s[:, t+1] - A_s[:, t])
 		Σ_s[:, :, t] =  Σ_f[:, :, t] - Σ_f[:, :, t] * A' * inv(Rs[:, :, t]) * (Rs[:, :, t] - Σ_s[:, :, t+1]) * inv(Rs[:, :, t]) * A * Σ_f[:, :, t]
-
 		Σ_t_ = inv(inv(Σ_f[:, :, t]) + A'*A)
 		Σ_s_cross[:, :, t] = Σ_t_ * A' * Σ_s[:, :, t]
     end
@@ -91,19 +94,14 @@ function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Fl
 end
 
 function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q::Array{Float64, 2}, prior::HPP_D)
-    # Run the forward pass
-    μ_f, Σ_f, A_s, Rs, log_Z = forward_(y, A, C, E_R, E_Q, prior)
-
-    # Run the backward pass
+    # Forward-Backward
+	μ_f, Σ_f, A_s, Rs, log_Z = forward_(y, A, C, E_R, E_Q, prior)
     μ_s, Σ_s, Σ_s_cross = backward_(A, μ_f, Σ_f, A_s, Rs)
 
     # Compute the hidden state sufficient statistics
     W_C = sum(Σ_s[:, :, 2:end], dims=3)[:, :, 1] + μ_s[:, 2:end] * μ_s[:, 2:end]'
-
     W_A = sum(Σ_s[:, :, 1:end-1], dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 1:end-1]'
-
     S_C = μ_s[:, 2:end] * y'
-
     S_A = sum(Σ_s_cross, dims=3)[:, :, 1] + μ_s[:, 1:end-1] * μ_s[:, 2:end]'
 
 	# Return the hidden state sufficient statistics
@@ -174,6 +172,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
 	Q_gam = missing
+
 	for i in 1:max_iter
 		E_R_inv, E_Q_inv, Q_gam = vb_m_step(y, hss, prior, A, C)
 		hss, μ_s0, Σ_s0, log_Z = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
@@ -238,27 +237,34 @@ function sample_Q(Xs, A, α_q, β_q)
     return diagm(1 ./ q_sampled) # inverse precision is variance
 end
 
-function test_Gibbs_RQ(rnd)
+function test_Gibbs_RQ(rnd, T = 100)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([10, 15])
-	R_lg = [30]
+	Q_lg = Diagonal([10.0, 15.0])
+	R_lg = [30.0]
 	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
+	Σ_0 = Diagonal([100.0, 1000.0])
+	println("R True:")
+	show(stdout, "text/plain", R_lg)
+	println()
+	println("Q True:")
+	show(stdout, "text/plain", Q_lg)
+	println()
+
 	Random.seed!(rnd)
-	T = 500
 	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 	prior = Q_Gamma(2, 0.001, 2, 0.001)
 
 	R = sample_R(x_true[:, 2:end], y, C_lg, prior.a, prior.b)
-	println("R", R)
+	println("\nR Sample", R)
 
 	Q = sample_Q(x_true[:, 2:end], A_lg, prior.α, prior.β)
-	println("Q", Q)
+	println("\nQ Sample", Q)
 end
 
-# test_Gibbs_RQ(111)
-# test_Gibbs_RQ(123)
+# R, Q sample methods tested !
+# test_Gibbs_RQ(111, 1000)
+# test_Gibbs_RQ(123, 1000)
 
 function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	"""
@@ -304,37 +310,39 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
 	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
+ 	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	
-    # Initialize t = T
-    X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
-	
-	# backward sampling
-	for t in T:-1:1
+	for t in T:-1:1 # backward sampling
 		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
 		
 		try
 			X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 		catch PosDefException
-			println("PosDefException at $t")
-			println("H_t", H_t)
+			println("PosDefException at t=$t")
+			println("\tH_t ", H_t)
 			U, Σ, V = svd(H_t)
 			H_t = U * diagm(Σ) * V'
-			println("H_t (svd)", H_t)
-			println("H_t (sym)", Symmetric(H_t))
+			# X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+			println("\tH_t (svd)", H_t)
+			# println("H_t (sym)", Symmetric(H_t))
 		end
 	end
 
 	return X
 end
 
+"""
+DEBUG FFBS in Linear Growth [ Compare with DLM with R ]
+"""
+
 function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
 	m_0 = prior.μ_0
-	C_0 = Diagonal(ones(K) .* 1e5)
-	
+	C_0 = Diagonal(ones(K) .* 1e7)
+	# C_0 = Diagonal(ones(K))
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
 
 	# akin to DLM with R, initilaize all diagonal elements to 1.0
@@ -342,7 +350,6 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
     Q = Diagonal(ones(K))
 
 	n_samples = Int.(mcmc/thinning)
-	# Store the samples
 	samples_X = zeros(n_samples, K, T)
 	samples_Q = zeros(n_samples, K, K)
 	samples_R = zeros(n_samples, P, P)
@@ -385,7 +392,6 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 	summary_stats_r = summarystats(R_chain)
 	summary_df_q = DataFrame(summary_stats_q)
 	summary_df_r = DataFrame(summary_stats_r)
-
 	summary_df_q = summary_df_q[[1, 4], :]
 	println("Q summary stats: ", summary_df_q)
 	println()
@@ -438,11 +444,9 @@ On-going Gibbs debug
 # Q = Diagonal([1.0, 1.0])
 # R = [1.0]
 # K = size(A_lg, 1)
-# Random.seed!(111)
-# y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 500)
-
-# test_gibbs(y, x_true, 3000, 1000, 2)
-
+# Random.seed!(10)
+# y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
+# test_gibbs(y, x_true, 5000, 1000, 1)
 
 function test_vb(y, x_true, hyperoptim=false, show_plot=false)
 	T = size(y, 2)
@@ -509,7 +513,7 @@ function main(n)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q = Diagonal([1.0, 1.0])
-	R = [0.5]
+	R = [10.0]
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
 	Σ_0 = Diagonal(ones(K))
@@ -527,11 +531,7 @@ function main(n)
 		Random.seed!(sd)
 		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
 		
-		"""
-		On-going FFBS Debug
-		"""
 		#test_gibbs(y, x_true, 20000, 10000, 1)
-
 		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
@@ -628,8 +628,6 @@ function main_graph(n, sd)
 	println("----- END Run seed: $sd -----\n")
 end
 
-#main_graph(500, 111)
-
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 	open(file_name, "w") do f
@@ -641,7 +639,7 @@ function out_txt(n)
 	end
 end
 
-#out_txt(200)
+out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
