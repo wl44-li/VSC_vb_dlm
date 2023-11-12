@@ -23,26 +23,44 @@ end
 """
 MCMC
 """
-function sample_r(xs, ys, c, α_r, β_r)
+function sample_r(xs, ys, c, α_r, β_r) # Ψ_1
 	T = length(ys)
-    α_post = α_r + T / 2
-    β_post = β_r + sum((ys - c * xs).^2) / 2
+	xs = xs[2:end]
+    α_post = α_r + T / 2 #shape
+    β_post = β_r + sum((ys - c * xs).^2) / 2 #rate
 
-	# emission precision posterior
+	# emission precision posterior, Julia Gamma (shpae, 1/rate)
 	λ_r = rand(Gamma(α_post, 1 / β_post))
 	return 1/λ_r
 end
 
-function sample_q(xs, a, α_q, β_q)
-	T = length(xs)
-    α_post = α_q + T / 2
+function sample_q(xs, a, α_q, β_q) # Ψ_2
+	T = length(xs) 
+    α_post = α_q + (T-1) / 2
     β_post = β_q + sum((xs[2:end] .- (a .* xs[1:end-1])).^2) / 2 
 	
 	# system precision posterior
 	λ_q = rand(Gamma(α_post, 1 / β_post)) 
-	
 	return 1/λ_q
 end
+
+function test_rq(rnd, T=100)
+	R = 1.0
+	Q = 1.0
+	println("Ground-truth r = $R, q = $Q")
+
+	Random.seed!(rnd)
+	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
+	r = sample_r(x_true, y, 1.0, 2.0, 0.001)
+	println("Sample r = $r")
+	q = sample_q(x_true, 1.0, 2.0, 0.001)
+	println("Sample q = $q")
+end
+
+# test_rq(123)
+# test_rq(123, 1000)
+# test_rq(12)
+# test_rq(12, 1000)
 
 function forward_filter(y, A, C, R, Q, m_0, c_0)
 	T = length(y)
@@ -84,11 +102,34 @@ function sample_x_ffbs(y, A, C, R, Q, m_0, c_0)
     return x
 end
 
+function test_ffbs(rnd, T=100)
+	R = 1.0
+	Q = 1.0
+	println("Ground-truth r = $R, q = $Q")
+
+	Random.seed!(rnd)
+	y, _ = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
+
+	Xs = zeros(T, 1000)
+	for iter in 1:1000
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
+		Xs[:, iter] = xs[2:end]
+	end
+
+	p = plot(Xs[1:end, 1:200], label = "", title="FFBS, V=$R, W=$Q")
+	display(p)
+
+	x_std = std(Xs, dims=2)[:]
+	p = plot(x_std, title="FFBS x std, T=$T", label="")
+	display(p)
+end
+
+# test_ffbs(111, 20)
+# test_ffbs(111, 100)
+
 function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	T = length(y)
-
-	m_0 = 0.0  # Prior mean for the states
-	c_0 = 1e7  
+	m_0, c_0 = 0.0, 1e7  # Prior DLM with R setting
 	
 	α = 2  # Shape for Gamma prior
 	β = 0.0001  # rate for Gamma prior
@@ -104,10 +145,10 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	
 	for i in 1:mcmc+burn_in
 		x = sample_x_ffbs(y, a, c, r, q, m_0, c_0)
-		x = x[2:end]
 		q = sample_q(x, a, α, β)
 		r = sample_r(x, y, c, α, β)
-	
+		x = x[2:end]
+
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_x[:, index] = x
@@ -145,8 +186,13 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show
 	if show_plot
 		p = plot((s_x[1:end, 1:200]), label = "", title="MCMC Trace Plot x[0:T]")
 		display(p)
+
 		# Agrees with DLM with R example !
 		p = plot(x_std, label = "", title="MCMC x std")
+		display(p)
+
+		p = plot_CI_ll(x_m, x_std, x_true)
+		title!(p, "MCMC latent x inference")
 		display(p)
 
 		p_q = plot(s_q, title="trace q")
@@ -162,10 +208,6 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show
 		p_q = density(Q_chain)
 		title!(p_q, "MCMC Q")
 		display(p_q)
-
-		p = plot_CI_ll(x_m, x_std, x_true)
-		title!(p, "MCMC latent x inference")
-		display(p)
 	end
 
 	# empirical truth to compare with VI
@@ -344,8 +386,10 @@ function update_ab(hpp::Priors_ll, qθ)
 end
 
 function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5)
-	# T = length(y)
-	# hss = HSS_ll(1.0*T, 1.0*T, 1.0*T, 1.0*T)
+
+	"""
+	Random initilisations?
+	"""
 	hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 
 	E_τ_r, E_τ_q  = missing, missing
@@ -405,26 +449,27 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
 	return τ_
 end
 
-function plot_CI_ll(μ_s, σ_s2, x_true, max_T = 20)
+function plot_CI_ll(μ_s, σ_s2, x_true = nothing, max_T = 30)
 	# μ_s :: vector of normal mean
 	# σ_s2 :: vector of corresponding variance
 	μ_s = μ_s[1:max_T]
 	σ_s2 = σ_s2[1:max_T]
-	x_true = x_true[1:max_T]
+
+	if x_true !== nothing
+		x_true = x_true[2:max_T+1]
+	end
 
 	# https://en.wikipedia.org/wiki/Standard_error, 95% CI
 	lower_bound = μ_s - 1.96 .* sqrt.(σ_s2)
 	upper_bound = μ_s + 1.96 .* sqrt.(σ_s2)
 	
-	# Create time variable for x-axis
 	T = 1:max_T
-	p = plot()
-
-	# Plot the smoothed means and the 95% CI
-	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
+	p = plot(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
 		label="95% CI", linewidth=2)
 	
-	plot!(T, x_true, label = "ground_truth")
+	if x_true !== nothing
+		plot!(T, x_true, label = "ground_truth")
+	end
 	return p
 end
 
@@ -439,27 +484,24 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false, show_plot = false)
 	println("\nHyperparam optimisation: $hyperoptim")
 	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim)
 
-	if show_plot
-		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
-		display(p)
-	end
-
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs)
 	x_std = sqrt.(σs_s)
 
-	p = plot(x_std, label = "", title="VI x std")
-	display(p)
-
 	println("\nVB q(r) mode: ", r)
 	println("VB q(q) mode: ", q)
-
 	if x_true !== nothing
-		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true, μs_s))
+		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
 	end
 
 	if show_plot
-		x_plot = plot_CI_ll(μs_s, σs_s, x_true)
+		p = plot(x_std, label = "", title="VI x std")
+		display(p)
+		
+		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		display(p)
+
+		x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true)
 		title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
 		display(x_plot)
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
@@ -486,35 +528,6 @@ function test_MLE(y, x_true = nothing)
 	end
 end
 
-function test(T=200)
-	println("Running experiments for local level model (with graphs):\n")
-	R = 1.0
-	Q = 1.0
-	println("Ground-truth r = $R, q = $Q")
-
-	Random.seed!(111)
-	y, _ = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
-
-	Xs = zeros(T, 5000)
-	for iter in 1:5000
-		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
-		Xs[:, iter] = xs[2:end]
-	end
-
-	# p = plot(Xs[1:end, end-200:end], label = "", title="FFBS, V=$R, W=$Q")
-	# display(p)
-
-	x_std = std(Xs, dims=2)[:]
-	p = plot(x_std, title="FFBS x std, T=$T", label="")
-	display(p)
-
-	#test_nuts(y)
-end
-
-# test(20)
-# test(100)
-# test(200)
-
 function test_nile()
 	R = 15099.8
 	Q = 1468.4
@@ -522,8 +535,7 @@ function test_nile()
 	y = vec(y)
 	y = Float64.(y)
 	T = length(y)
-
-	Random.seed!(111)
+	Random.seed!(123)
 
 	Xs = zeros(T, 1000)
 	for iter in 1:1000
@@ -532,16 +544,15 @@ function test_nile()
 		Xs[:, iter] = xs[2:end]
 	end
 
-	# Agrees with DLM with R!
+	# FFBS agrees with DLM with R!
 	x_std = std(Xs, dims=2)[:]
 	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
 	display(p)
 
-	test_gibbs_ll(y, nothing, 3000, 0, 1)
+	# Gibbs agrees with DLM with R
+	test_gibbs_ll(y, nothing, 1500, 0, 1, true)
 	test_MLE(y)
-
-	# Not good with real-world datasets, think...
-	test_vb_ll(y, nothing, true)
+	#test_vb_ll(y, nothing, true)
 end
 
 #test_nile()
@@ -596,7 +607,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1, true)
 	end
 
 	if sampler == "hmc" #turing
@@ -607,7 +618,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
 	
-	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true)
+	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, false, true)
 
 	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1.0), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1.0)
 	display(plot_r)
@@ -624,9 +635,9 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p2)
 end
 
-# main_graph(111, 100, "nuts")
-
 main_graph(123, 500, "gibbs")
+
+# main_graph(111, 100, "nuts")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
