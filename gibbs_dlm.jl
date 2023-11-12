@@ -15,6 +15,24 @@ begin
 	using DataFrames
 end
 
+function gen_data(A, C, Q, R, m_0, C_0, T)
+	K, _ = size(A)
+	D, _ = size(C)
+	x = zeros(K, T+1)
+	y = zeros(D, T)
+
+	x[:, 1] = zeros(K)
+	x[:, 2] = rand(MvNormal(A*m_0, A'*C_0*A + Q))
+	y[:, 1] = C * x[:, 2] + rand(MvNormal(zeros(D), R))
+
+	for t in 2:T
+		x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
+		y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), R)) 
+	end
+
+	return y, x
+end
+
 """
 MCMC
 """
@@ -91,7 +109,7 @@ end
 # Multi-variate DLM with full R
 function sample_R_(y, x, C, v_0, S_0)
     T = size(y, 2)
-	
+	x = x[:, 2:end]
     residuals = [y[:, t] - C * x[:, t] for t in 1:T]
 	SS_y = sum([residuals[t] * residuals[t]' for t in 1:T])
 	
@@ -107,48 +125,41 @@ function test_full_R(sd, T = 100)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	Q = Diagonal([1.0, 1.0])
-	R = [2.0 0.5; 0.5 4.0] # Full-cov R
+	R = [5.0 1.0; 1.0 4.0] # Full-cov R
 
 	println("R True:")
 	show(stdout, "text/plain", R)
 	println()
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
+	m_0 = [0.0, 0.0]
+	C_0 = Diagonal([1.0, 1.0])
 	Random.seed!(sd)
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	y, x_true = gen_data(A, C, Q, R, m_0, C_0, T)
 
 	P, T = size(y)
-	v_0 = P
-	S_0 = Matrix{Float64}(I * 0.01, P, P)
+	v_0 = P + 1.0
+	S_0 = Matrix{Float64}(I * 0.001, P, P)
 	R = sample_R_(y, x_true, C, v_0, S_0)
 	println("\nR Sample", R)
 end
 
-test_full_R(10, 100)
-println()
-test_full_R(10, 3000)
+# test_full_R(123, 100)
+# println()
+# test_full_R(123, 2000)
 
 function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
-	m_0 = zeros(K)
-	C_0 = Matrix{Float64}(I .* 1e7, K, K)
+	m_0, C_0 = zeros(K), Matrix{Float64}(I .* 1e7, K, K)
 	
 	v_0 = P + 1.0 
-	S_0 = Matrix{Float64}(0.01 * I, P, P)
-	# R⁻¹ = rand(Wishart(v_0, inv(S_0)))
-	# R = inv(R⁻¹)
-	R = Diagonal(ones(P))
+	S_0 = Matrix{Float64}(0.001 * I, P, P)
+	α, β = 2, 0.001
 
 	"""
-	DEBUG: hyper-prior [Pathological Gamma(0.01, 0.01)]
-	α <= 1 the mode is at 0, otherwise the mode is away from 0
-	when β (rate, inverse-scale) decreases, horizontal scale decreases, squeeze left and up
+	Initilise both R, Q to I (DLM with R setting)
 	"""
-	# α, β = 2, 0.5
-	# ρ_q = rand(Gamma(α, β), K) 
-    # Q = Diagonal(1 ./ ρ_q) # inverse precision is var
+	R = Diagonal(ones(P))
     Q = Diagonal(ones(K))
 	
 	n_samples = Int.(mcmc/thinning)
@@ -158,11 +169,10 @@ function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=fals
 	
 	for i in 1:mcmc+burn_in
 		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
+		Q = sample_Q(x, A, α, β) # still diagonal gamma 
+		R = sample_R_(y, x, C, v_0, S_0)
 		x = x[:, 2:end]
 
-		Q = sample_Q(x, A, α, β)
-		R = sample_R_(y, x, C, v_0, S_0)
-	
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -172,6 +182,36 @@ function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=fals
 	end
 
 	return samples_X, samples_Q, samples_R
+end
+
+function test_gibbs_cov(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
+	A = [1.0 0.0; 0.0 1.0]
+	C = [1.0 0.0; 0.0 1.0]
+	D, _ = size(y)
+	K = size(A, 1)
+
+	println("\n--- MCMC : R Full Covariances ---")
+	n_samples = Int.(mcmc/thin)
+	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
+
+	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
+	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
+	R_chain = Chains(reshape(Rs_samples, n_samples, D^2))
+
+	summary_stats_q = summarystats(Q_chain)
+	summary_stats_r = summarystats(R_chain)
+	summary_df_q = DataFrame(summary_stats_q)
+	summary_df_r = DataFrame(summary_stats_r)
+	summary_df_q = summary_df_q[[1,4], :]
+	println("Q summary stats: ", summary_df_q)
+	println()
+	println("R summary stats: ", summary_df_r)
+	println()
+
+	xs_m = mean(Xs_samples, dims=1)[1, :, :]
+	if x_true !== nothing
+		println("MSE, MAD of MCMC X mean: ", error_metrics(x_true[:, 2:end], xs_m))
+	end
 end
 
 """
@@ -184,8 +224,8 @@ begin
 	    W_R::Array{Float64, 2}
 	    a::Float64
 	   	b::Float64
-	    μ_0::Array{Float64, 1}
-	    Σ_0::Array{Float64, 2}
+	    m_0::Array{Float64, 1}
+	    C_0::Array{Float64, 2}
 	end
 
 	struct Q_Wishart
@@ -216,7 +256,7 @@ function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float6
 	return W_Rn_inv ./ ν_Rn, Exp_Q⁻¹, Q_Wishart(ν_Rn, inv(W_Rn_inv), a_, b_s)
 end
 
-function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, μ_0, Σ_0)
+function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, m_0, C_0)
     _, T = size(y)
     K = size(A, 1)
         
@@ -224,7 +264,7 @@ function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 
     Σ_f = zeros(K, K, T+1)
     A_s = zeros(K, T)
 	R_s = zeros(K, K, T)
-	μ_f[:, 1], Σ_f[:, :, 1] = μ_0, Σ_0
+	μ_f[:, 1], Σ_f[:, :, 1] = m_0, C_0
 
 	log_Z = 0.0
     for t in 1:T # Forward pass (Kalman Filter)
@@ -265,7 +305,7 @@ end
 
 function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, prior::Prior)
 	# Forward-Backward
-	μ_f, Σ_f, A_s, R_s, log_Z = forward_(y, A, C, E_R, E_Q, prior.μ_0, prior.Σ_0)
+	μ_f, Σ_f, A_s, R_s, log_Z = forward_(y, A, C, E_R, E_Q, prior.m_0, prior.C_0)
     μ_s, Σ_s, Σ_s_cross = backward_(A, μ_f, Σ_f, A_s, R_s)
 
     # Compute the hidden state sufficient statistics [ Beale 5.3, page 183 ]
@@ -283,57 +323,13 @@ function vbem_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2},
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	E_R, E_Q  = missing, missing
 	
-	for i in 1:max_iter
+	for _ in 1:max_iter
 		E_R, E_Q, _ = vb_m_step(y, hss, prior, A, C)
 				
 		hss, _ = vb_e_step(y, A, C, E_R, E_Q, prior)
 	end
 
 	return E_R, E_Q
-end
-
-function vbem_his_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=100)
-    P, _ = size(y)
-    K, _ = size(A)
-
-    W_C = zeros(K, K)
-    W_A = zeros(K, K)
-    S_C = zeros(P, K)
-    S_A = zeros(K, K)
-    hss = HSS(W_C, W_A, S_C, S_A)
-	E_R, E_Q  = missing, missing
-	
-    # Initialize the history of E_R and E_Q
-    E_R_history = zeros(P, P, max_iter)
-    E_Q_history = zeros(K, K, max_iter)
-
-    # Repeat until convergence
-    for iter in 1:max_iter
-		E_R, E_Q, _ = vb_m_step(y, hss, prior, A, C)
-				
-		hss, _ = vb_e_step(y, A, C, E_R, E_Q, prior)
-
-        # Store the history of E_R and E_Q
-        E_R_history[:, :, iter] = E_R
-        E_Q_history[:, :, iter] = E_Q
-    end
-
-	p1 = plot(title = "Learning of R")
-
-	# Show progress of diagonal entries
-    for i in 1:P
-        plot!(10:max_iter, [E_R_history[i, i, t] for t in 10:max_iter], label = "R[$i, $i]")
-    end
-
-    p2 = plot(title = "Learning of Q")
-    for i in 1:K
-        plot!(10:max_iter, [E_Q_history[i, i, t] for t in 10:max_iter], label = "Q[$i, $i]")
-    end
-	
-	function_name = "R_Q_Progress"
-	p = plot(p1, p2, layout = (1, 2))
-	plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-    savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 end
 
 function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=5e-3)
@@ -450,12 +446,12 @@ MCMC (Diagonal R, Q)
 """
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
     P, T = size(Ys)
+	Xs = Xs[:, 2:end]
     ρ_sampled = zeros(P)
     for i in 1:P
         Y = Ys[i, :]
-        a_post = a_ρ + T / 2
-        b_post = b_ρ + 0.5 * sum((Y' - C[i, :]' * Xs).^2)
-		
+        a_post = a_ρ + T / 2 # shape
+        b_post = b_ρ + 0.5 * sum((Y' - C[i, :]' * Xs).^2) # rate
         ρ_sampled[i] = rand(Gamma(a_post, 1 / b_post))
     end
     return diagm(1 ./ ρ_sampled)
@@ -466,19 +462,18 @@ function sample_Q(Xs, A, α_q, β_q)
     q_sampled = zeros(K)
     for i in 1:K
         X_diff = Xs[i, 2:end] - (A * Xs[:, 1:end-1])[i, :]
-        α_post = α_q + T / 2 - 1  # Subtracting 1 as the first state doesn't have a predecessor
+        α_post = α_q + (T-1) / 2
         β_post = β_q + 0.5 * sum(X_diff.^2)
-        
-        q_sampled[i] = rand(Gamma(α_post, 1 / β_post))
+        q_sampled[i] = rand(Gamma(α_post, 1 / β_post)) # sample precison
     end
     return diagm(1 ./ q_sampled)
 end
 
-function test_Gibbs_RQ(sd, T=100)
+function test_Gibbs_RQ(sd, T=500)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	Q = Diagonal([10.0, 8.0])
-	R = Diagonal([1.0, 2.0])
+	R = Diagonal([1.0, 1.0])
 
 	println("R True:")
 	show(stdout, "text/plain", R)
@@ -487,14 +482,14 @@ function test_Gibbs_RQ(sd, T=100)
 	show(stdout, "text/plain", Q)
 	println()
 
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
+	m_0 = [0.0, 0.0]
+	C_0 = Diagonal([1.0, 1.0])
 	Random.seed!(sd)
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	y, x_true = gen_data(A, C, Q, R, m_0, C_0, T)
 	prior = Q_Gamma(2, 0.001, 2, 0.001)
 
-	R = sample_R(x_true[:, 2:end], y, C, prior.a, prior.b)
-	Q = sample_Q(x_true[:, 2:end], A, prior.α, prior.β)
+	R = sample_R(x_true, y, C, prior.a, prior.b)
+	Q = sample_Q(x_true, A, prior.α, prior.β)
 
 	println("R Sample:")
 	show(stdout, "text/plain", R)
@@ -527,11 +522,10 @@ function gibbs_diag(y, A, C, prior::HPP_D, mcmc=3000, burn_in=1500, thinning=1, 
 			println("MCMC diagonal R, Q debug, iteration : $i")
 		end
 		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
-		x = x[:, 2:end]
-
 		Q = sample_Q(x, A, α, β)
 		R = sample_R(x, y, C, a, b)
-	
+		x = x[:, 2:end]
+
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -572,7 +566,7 @@ function test_gibbs_diag(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
 	if x_true !== nothing
-		println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
+		println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true[:, 2:end], xs_m))
 	end
 end
 
@@ -601,7 +595,7 @@ function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
 	μs_s, _, _ = backward_(A, μs_f, σs_f2, A_s, R_s)
 
 	if x_true !== nothing
-		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
+		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true[:, 2:end], μs_s[:, 2:end]))
 	end
 
 	D, _ = size(y)
@@ -621,40 +615,10 @@ function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
 		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
-	μs_f, σs_f2, A_s, R_s = forward_(y, A, C, R, Q, prior.μ_0, prior.Σ_0)
+	μs_f, σs_f2, A_s, R_s = forward_(y, A, C, R, Q, prior.m_0, prior.C_0)
     μs_s, _, _ = backward_(A, μs_f, σs_f2, A_s, R_s)
 	if x_true !== nothing
 		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true, μs_s))
-	end
-end
-
-function test_gibbs_cov(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
-	A = [1.0 0.0; 0.0 1.0]
-	C = [1.0 0.0; 0.0 1.0]
-	D, _ = size(y)
-	K = size(A, 1)
-
-	println("\n--- MCMC : R Full Covariances ---")
-	n_samples = Int.(mcmc/thin)
-	println("\n--- n_samples: $n_samples, burn-in: $burn_in, thinning: $thin ---")
-
-	@time Xs_samples, Qs_samples, Rs_samples = gibbs_dlm_cov(y, A, C, mcmc, burn_in, thin)
-	Q_chain = Chains(reshape(Qs_samples, n_samples, K^2))
-	R_chain = Chains(reshape(Rs_samples, n_samples, D^2))
-
-	summary_stats_q = summarystats(Q_chain)
-	summary_stats_r = summarystats(R_chain)
-	summary_df_q = DataFrame(summary_stats_q)
-	summary_df_r = DataFrame(summary_stats_r)
-	summary_df_q = summary_df_q[[1,4], :]
-	println("Q summary stats: ", summary_df_q)
-	println()
-	println("R summary stats: ", summary_df_r)
-	println()
-
-	xs_m = mean(Xs_samples, dims=1)[1, :, :]
-	if x_true !== nothing
-		println("MSE, MAD of MCMC X mean: ", error_metrics(x_true, xs_m))
 	end
 end
 
@@ -663,24 +627,22 @@ function test_data(rnd, max_T = 500)
 	C = [1.0 0.0; 0.0 1.0]
 	Q = Diagonal([1.0, 1.0]) # Diagonal Q
 	R = [0.5 0.2; 0.2 0.5] # Full-cov R
-	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1.0, 1.0])
+	m_0 = [0.0, 0.0]
+	C_0 = Diagonal([1.0, 1.0])
 	Random.seed!(rnd)
-	y, x_true = gen_data(A, C, Q, R, μ_0, Σ_0, max_T)
+	y, x_true = gen_data(A, C, Q, R, m_0, C_0, max_T)
 	return y, x_true
 end
 
 function test_gibbs()
-	seeds = [103, 133, 123, 105, 233]
-	#seeds = [111, 199, 188, 234, 236]
+	seeds = [111, 199, 188, 234, 236]
+	#seeds = [108, 134, 123, 105, 233]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		test_gibbs_diag(y, x_true, 20000, 10000, 1)
 		println()
-		test_gibbs_cov(y, x_true, 20000, 10000, 1)
-		println()
-		test_vb(y, x_true) # needs a quick clean-up
+		#test_gibbs_cov(y, x_true, 20000, 10000, 1)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
@@ -691,8 +653,8 @@ function com_vb_gibbs()
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
-		test_gibbs_cov(y, x_true, 60000, 10000, 3)
-		test_vb(y, x_true)
+		test_gibbs_cov(y, x_true, 20000, 5000, 1)
+		test_vb(y, x_true) # DEBUG !
 	end
 end
 
@@ -702,12 +664,14 @@ function out_txt()
 		redirect_stdout(f) do
 			redirect_stderr(f) do
 				com_vb_gibbs()
+				#test_gibbs()
 			end	
 		end
 	end
 end
 
-#out_txt()
+out_txt()
+
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
 # DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

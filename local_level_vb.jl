@@ -11,6 +11,22 @@ begin
 	using StatsPlots
 end
 
+function gen_data(A, C, Q, R, m_0, C_0, T)
+	println("Data gen for local level")
+	x = zeros(T+1)
+	y = zeros(T)
+	
+	x[1] = 0 # assume x_0 is 0
+	x[2] = rand(Normal(A*m_0, sqrt(A*C_0*A + Q)))
+	y[1] = rand(Normal(C*x[2], sqrt(R)))
+
+	for t in 2:T
+		x[t+1] = A * x[t] + sqrt(Q) * randn()
+		y[t] = C * x[t+1] + sqrt(R) * randn()
+	end
+	return y, x
+end
+
 begin
 	struct HSS_uni
 	    W_A::Float64
@@ -35,7 +51,7 @@ function sample_r(xs, ys, c, α_r, β_r) # Ψ_1
 end
 
 function sample_q(xs, a, α_q, β_q) # Ψ_2
-	T = length(xs) 
+	T = length(xs) # xs length is T+1
     α_post = α_q + (T-1) / 2
     β_post = β_q + sum((xs[2:end] .- (a .* xs[1:end-1])).^2) / 2 
 	
@@ -280,7 +296,6 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     for t in 1:T
         a_s[t] = a_t = a * μ_f[t]
         rs[t] = r_t = a * σ_f[t] * a + 1/E_τ_q # Q
-
 		f_t = c * a_t
 		q_t = c * r_t * c + 1/E_τ_r # R
 
@@ -296,7 +311,6 @@ end
 
 function backward_ll(a, μ_f, σ_f, a_s, rs)
     T = length(μ_f) - 1
-	
     μ_s = similar(μ_f)
     σ_s = similar(σ_f)
     σ_s_cross = zeros(T)
@@ -577,7 +591,7 @@ end
 function main(max_T)
 	println("Running experiments for local level model:\n")
 	println("T = $max_T")
-	R = 0.1
+	R = 0.5
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
@@ -591,6 +605,8 @@ function main(max_T)
 		test_vb_ll(y, x_true)
 	end
 end
+
+#main(500)
 
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
@@ -635,7 +651,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p2)
 end
 
-main_graph(123, 500, "gibbs")
+#main_graph(239, 500, "gibbs")
 
 # main_graph(111, 100, "nuts")
 

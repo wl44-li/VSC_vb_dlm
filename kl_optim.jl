@@ -142,53 +142,6 @@ struct HSS
 	S_A::Array{Float64, 2}
 end
 
-function gen_data(A, C, Q, R, m_0, C_0, T)
-
-    if length(A) == 1 && length(C) == 1 # uni-variate
-		x = zeros(T+1)
-		y = zeros(T)
-		
-        x[1] = 0 # assume x_0 is 0
-        x[2] = rand(Normal(A*m_0, sqrt(A*C_0*A + Q)))
-        y[1] = rand(Normal(C*x[2], sqrt(R)))
-
-		for t in 2:T
-            x[t+1] = A * x[t] + sqrt(Q) * randn()
-		    y[t] = C * x[t+1] + sqrt(R) * randn()
-		end
-		return y, x
-
-    else """
-            Debug Gen_function for multi-variate case !!!
-         """
-
-        K, _ = size(A)
-        D, _ = size(C)
-        x = zeros(K, T+1)
-        y = zeros(D, T)
-
-        x[:, 1] = m_0
-        x[:, 2] = rand(MvNormal(A*m_0, A'*C_0*A + Q))
-        y[:, 1] = C * x[:, 2] + rand(MvNormal(zeros(D), R)) 
-
-        for t in 2:T
-            if (tr(Q) != 0)
-                x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
-            else
-                x[:, t+1] = A * x[:, t] # Q zero matrix special case of PPCA
-            end
-
-            if D == 1
-                y[:, t] = C * x[:, t] + rand(MvNormal(zeros(D), sqrt.(R))) # Linear growth
-            else
-                y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), R)) 
-            end
-        end
-
-	    return y, x
-    end
-end
-
 function plot_latent(x_true, x_inf, max_T = 50)
     # assume both are T x k
     T, K = size(x_true)

@@ -14,6 +14,24 @@ begin
 	using StateSpaceModels
 end
 
+function gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	K, _ = size(A) # K = 2
+	D, _ = size(C)
+	x = zeros(K, T+1)
+	y = zeros(D, T) # D = 1
+
+	x[:, 1] = zeros(K)
+	x[:, 2] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
+	y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
+
+	for t in 2:T
+		x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
+		y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), sqrt.(R))) 
+	end
+
+	return y, x
+end
+
 """
 VBEM
 """
@@ -109,59 +127,15 @@ function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64,
 end
 
 function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=100)
-	
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
 	E_R_inv, E_Q_inv = missing, missing
 
 	for _ in 1:max_iter
-		E_R_inv, E_Q_inv, _ = vb_m_step(y, hss, prior, A, C)
-				
+		E_R_inv, E_Q_inv, _ = vb_m_step(y, hss, prior, A, C)		
 		hss, _, _, _ = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
 	end
 	
 	return E_R_inv, E_Q_inv
-end
-
-function vbem_RQ_plot(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=100)
-    P, T = size(y)
-    K, _ = size(A)
-
-    W_C = zeros(K, K)
-    W_A = zeros(K, K)
-    S_C = zeros(K, P)
-    S_A = zeros(K, K)
-    hss = HSS(W_C, W_A, S_C, S_A)
-	
-    # Initialize the history of E_R and E_Q
-    E_R_history = zeros(P, max_iter)
-    E_Q_history = zeros(K, K, max_iter)
-
-    # Repeat until convergence
-    for iter in 1:max_iter
-		E_R_inv, E_Q_inv = vb_m_step(y, hss, prior, A, C)
-				
-		hss, _ = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
-
-        # Store the history of E_R and E_Q
-        E_R_history[:, iter] = E_R_inv
-        E_Q_history[:, :, iter] = E_Q_inv
-    end
-
-	p1 = plot(title = "Learning of R")
-    for i in 1:P
-        plot!(5:max_iter, [E_R_history[i, t] for t in 5:max_iter], label = "R[$i]")
-    end
-
-    p2 = plot(title = "Learning of Q")
-    for i in 1:K
-        plot!(5:max_iter, [E_Q_history[i, i, t] for t in 5:max_iter], label = "Q[$i, $i]")
-    end
-	
-	# function_name = "R_Q_Progress"
-	p = plot(p1, p2, layout = (1, 2))
-	# plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(function_name)_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-    # savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-	return p
 end
 
 function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=5e-4)
@@ -179,7 +153,6 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 
 		kl_ρ = sum([kl_gamma(prior.a, prior.b, Q_gam.a, (Q_gam.b)[s]) for s in 1:D])
 		kl_𝛐 = sum([kl_gamma(prior.α, prior.β, Q_gam.α, (Q_gam.β)[s]) for s in 1:K])
-		
 		elbo = log_Z - kl_ρ - kl_𝛐
 		el_s[i] = elbo
 		
@@ -210,18 +183,16 @@ end
 MCMC
 """
 function sample_R(Xs, Ys, C, a_ρ, b_ρ)
-    P, T = size(Ys)
-    ρ_sampled = zeros(P)
-    for i in 1:P
-        Y = Ys[i, :]
-        a_post = a_ρ + T / 2 #shape
-        b_post = b_ρ + 0.5 * sum((Y' - C[i, :]' * Xs).^2) #rate
-		
-        ρ_sampled[i] = rand(Gamma(a_post, 1 / b_post)) #shape, 1/rate
-    end
+    _, T = size(Ys)
+	Xs = Xs[:, 2:end]
+
+	Y = Ys[1, :]
+	a_post = a_ρ + T / 2 #shape
+	b_post = b_ρ + 0.5 * sum((Y' - C[1, :]' * Xs).^2) #rate
+	ρ_sampled = rand(Gamma(a_post, 1 / b_post)) #shape, 1/rate
 
 	# inverse precision is variance
-    return diagm(1 ./ ρ_sampled)
+    return diagm([1 / ρ_sampled])
 end
 
 function sample_Q(Xs, A, α_q, β_q)
@@ -229,7 +200,7 @@ function sample_Q(Xs, A, α_q, β_q)
     q_sampled = zeros(K)
     for i in 1:K
         X_diff = Xs[i, 2:end] - (A * Xs[:, 1:end-1])[i, :]
-        α_post = α_q + T / 2 
+        α_post = α_q + (T-1) / 2 
         β_post = β_q + 0.5 * sum(X_diff.^2)
         
         q_sampled[i] = rand(Gamma(α_post, 1 / β_post)) #Julia gamma (shape, 1/rate)
@@ -255,16 +226,18 @@ function test_Gibbs_RQ(rnd, T = 100)
 	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 	prior = Q_Gamma(2, 0.001, 2, 0.001)
 
-	R = sample_R(x_true[:, 2:end], y, C_lg, prior.a, prior.b)
-	println("\nR Sample", R)
+	R = sample_R(x_true, y, C_lg, prior.a, prior.b)
+	println("\nR Sample ", R)
 
-	Q = sample_Q(x_true[:, 2:end], A_lg, prior.α, prior.β)
-	println("\nQ Sample", Q)
+	Q = sample_Q(x_true, A_lg, prior.α, prior.β)
+	println("\nQ Sample ", Q)
 end
 
 # R, Q sample methods tested !
-# test_Gibbs_RQ(111, 1000)
+# test_Gibbs_RQ(123, 100)
 # test_Gibbs_RQ(123, 1000)
+# test_Gibbs_RQ(10, 100)
+# test_Gibbs_RQ(10, 1000)
 
 function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	"""
@@ -310,22 +283,34 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
 	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
- 	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
 	
+	try
+		X[:, end] = rand(MvNormal(ms[:, end], Cs[:, :, end]))
+	catch PosDefException
+		println("PosDefException at t=$T")
+		U, Σ, V = svd(Cs[:, :, end])
+		H_T = U * diagm(Σ) * V'
+ 		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(H_T)))
+	end
+
 	for t in T:-1:1 # backward sampling
-		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
-		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
+		C_t = Cs[:, :, t]
+		# U_c, Σ_c, V_c = svd(Cs[:, :, t])
+		# C_t = U_c * diagm(Σ_c) * V_c'
+
+		h_t = ms[:, t] + C_t * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
+		H_t = C_t - C_t * A' * inv(Rs[:, :, t]) * A * C_t
 		
 		try
+			U, Σ, V = svd(H_t)
+			H_t = U * diagm(Σ) * V'
 			X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
 		catch PosDefException
 			println("PosDefException at t=$t")
-			println("\tH_t ", H_t)
-			U, Σ, V = svd(H_t)
-			H_t = U * diagm(Σ) * V'
-			# X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
-			println("\tH_t (svd)", H_t)
-			# println("H_t (sym)", Symmetric(H_t))
+			# println("\tH_t ", H_t)
+			# U, Σ, V = svd(H_t)
+			# H_t = U * diagm(Σ) * V'
+			# println("\tH_t (svd)", H_t)
 		end
 	end
 
@@ -333,7 +318,7 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 end
 
 """
-DEBUG FFBS in Linear Growth [ Compare with DLM with R ]
+Check FFBS in Linear Growth [ Compare with DLM with R ]
 """
 
 function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug=false)
@@ -341,7 +326,7 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 	K = size(A, 2)
 	
 	m_0 = prior.μ_0
-	C_0 = Diagonal(ones(K) .* 1e7)
+	C_0 = prior.Σ_0
 	# C_0 = Diagonal(ones(K))
 	a, b, α, β = prior.a, prior.b, prior.α, prior.β
 
@@ -359,12 +344,11 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 		if debug
 			println("Current iteration: $i")
 		end
-		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
-		x = x[:, 2:end]
-		
+		x = ffbs_x(y, A, C, R, Q, m_0, C_0)		
 		Q = sample_Q(x, A, α, β)
 		R = sample_R(x, y, C, a, b)
-	
+		x = x[:, 2:end]
+
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
 		    samples_X[index, :, :] = x
@@ -375,11 +359,11 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
+function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e3, K, K))
 	n_samples = Int.(mcmc/thin)
 
 	println("--- MCMC ---")
@@ -399,7 +383,9 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 
 	xs_m = mean(Xs_samples, dims=1)[1, :, :]
 	xs_std = std(Xs_samples, dims=1)[1, :, :]
-	println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true[:, 2:end], xs_m))
+	if x_true !== nothing
+		println("\nMSE, MAD of MCMC X mean: ", error_metrics(x_true[:, 2:end], xs_m))
+	end
 
 	if show_plot
 		R_chain = Chains(reshape(1 ./ Rs_samples, n_samples, 1))
@@ -437,15 +423,15 @@ function test_gibbs(y, x_true, mcmc=10000, burn_in=5000, thin=1, show_plot=false
 end
 
 """
-On-going Gibbs debug
+On-going Gibbs debug, PosDefException for back sample at t=2, need to use SVD !
 """
 # A_lg = [1.0 1.0; 0.0 1.0]
 # C_lg = [1.0 0.0]
 # Q = Diagonal([1.0, 1.0])
-# R = [1.0]
+# R = [10.0]
 # K = size(A_lg, 1)
-# Random.seed!(10)
-# y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
+# Random.seed!(111)
+# y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 500)
 # test_gibbs(y, x_true, 5000, 1000, 1)
 
 function test_vb(y, x_true, hyperoptim=false, show_plot=false)
@@ -513,7 +499,7 @@ function main(n)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	Q = Diagonal([1.0, 1.0])
-	R = [10.0]
+	R = [0.5]
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
 	Σ_0 = Diagonal(ones(K))
@@ -530,8 +516,6 @@ function main(n)
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
-		
-		#test_gibbs(y, x_true, 20000, 10000, 1)
 		comp_vb_mle(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
