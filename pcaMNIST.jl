@@ -15,7 +15,7 @@ pyplot()
 - package :em, :bayes option will not run
 - package default mle option agrees with standard pca
 
-Consider reduce EM iterations (early stop before iter 200),
+Consider reduce EM iterations (early stop before iter 100, 50, 30, 10),
 
 Consider standardise data? (get rid of the 0s from the white pixels)
 """
@@ -129,7 +129,7 @@ y = zscore(y, 1)
 # pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
 # M = projection(pca)
 
-C = vb_ppca_k2(y, 500, false)
+C = vb_ppca_k2(y, 30, false)
 M = svd(C).U
 
 compare_0(train_y, train_labels, M)
