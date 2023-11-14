@@ -11,11 +11,11 @@ using Plots
 using StatsBase
 pyplot()
 
-"""DEBUG zero-forcing VB-PPCA
+""" DEBUG zero-forcing VB-PPCA
 - package :em, :bayes option will not run
 - package default mle option agrees with standard pca
 
-Consider reduce EM iterations (early stop before iter 100, 50, 30, 10),
+Consider reduce EM iterations (early stop before iter 100, 50, 30, 10)
 
 Consider standardise data? (get rid of the 0s from the white pixels)
 """
@@ -30,9 +30,9 @@ function compareDigits(train_y, train_labels, M, dA, dB)
     xA, xB = M'*yA, M'*yB
     # default(ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     #         legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter(xA[1,:], xA[2,:], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    scatter(xA[1, :], xA[2, :], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter!(xB[1,:], xB[2,:], c=:blue, label="Digit $(dB)", ms=0.8, msw=0)
+    scatter!(xB[1, :], xB[2, :], c=:blue, label="Digit $(dB)", ms=0.8, msw=0)
 end
 
 function compare_0(train_y, train_labels, M)
@@ -93,7 +93,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     # end
 
     if method == "vbem"
-        C = vb_ppca_k2(y, 50, false)
+        C = vb_ppca_k2(y, 10, false)
         M = svd(C).U
     end
 
@@ -111,33 +111,24 @@ test_MNIST(100, true, "vbem")
 
 """
 On-going PPCA-VB Testing
-
-- ELBO heading down?
-- prior choices?
+- check ELBO always increasing
+- prior choices
+- random starts 
 - D = 28 x 28, K = 2
 """
 
-# train_y, train_labels = MNIST(split=:train)[:]
+train_y, train_labels = MNIST(split=:train)[:]
 
 #train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
 
-# T = size(train_y, 3)
-# y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
-
-# y = zscore(y, 1)
+T = size(train_y, 3)
+y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
+y = zscore(y, 1)
 
 # pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
 # M = projection(pca)
 
-# C = vb_ppca_k2(y, 500, false)
-# M = svd(C).U
+C = vb_ppca_k2(y, 10, false)
+M = svd(C).U
 
-# compare_0(train_y, train_labels, M)
-
-# plots = []
-
-# for k in 1:5
-#     push!(plots, compareDigits(train_y, train_labels, M, 2k-2,2k-1))
-# end
-
-# plot(plots..., size = (1600, 1000), margin = 5mm)
+compare_0(train_y, train_labels, M)

@@ -9,6 +9,23 @@ begin
 	using MultivariateStats
 end
 
+function gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	K, _ = size(A)
+	D, _ = size(C)
+	x = zeros(K, T)
+	y = zeros(D, T)
+
+	x[:, 1] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
+	y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
+
+	for t in 2:T
+		x[:, t] = A * x[:, t-1] + rand(MvNormal(zeros(K), Q))
+		y[:, t] = C * x[:, t] + rand(MvNormal(zeros(D), R)) 
+	end
+
+	return y, x
+end
+
 begin
 	struct HSS_PPCA
 	    W_C::Matrix{Float64}
@@ -104,25 +121,18 @@ function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
     μs = zeros(K, T)
     Σs = zeros(K, K, T)
 	Σs_ = zeros(K, K, T)
-	
-	# Extract μ_0 and Σ_0 from the HPP struct
-    μ_0 = hpp.μ_0
-    Σ_0 = hpp.Σ_0
 
-	# initialise for t = 1
-	Σ₀_ = Σ_0
-	Σs_[:, :, 1] = Σ₀_
-	
-    Σs[:, :, 1] = inv(I + exp_np.CᵀR⁻¹C)
-    μs[:, 1] = Σs[:, :, 1]*(exp_np.CᵀR⁻¹*ys[:, 1])
+	# initialise for t = 1, Σ_0 is a multiple of I
+	Σs_[:, :, 1] = hpp.Σ_0
 		
-	# iterate over T
-	for t in 2:T
-		Σₜ₋₁_ = Σs[:, :, t-1]
-		Σs_[:, :, t] = Σₜ₋₁_
-		
+	# iterate over T, Algorithm 5.1
+	for t in 1:T		
 		Σs[:, :, t] = inv(I + exp_np.CᵀR⁻¹C)
     	μs[:, t] = Σs[:, :, t]*(exp_np.CᵀR⁻¹*ys[:, t])
+
+		if t < T
+			Σs_[:, :, t+1] = Σs[:, :, t]
+		end
 	end
 
 	return μs, Σs, Σs_
@@ -151,7 +161,7 @@ end
 
 function vb_e(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
     _, T = size(ys)
-	# forward pass α_t(x_t)
+	# forward pass α_t(x_t) suffices as A = 0 matrix
 	ωs, Υs, Σs_ = v_forward(ys, exp_np, hpp)
 	
 	# hidden state sufficient stats 	
@@ -221,10 +231,13 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=300)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=5e-6; debug = false)
 	D, _ = size(ys)
 	K = length(hpp.γ)
 	
+	"""
+	TO-DO: other initialisations
+	"""
 	W_C = Matrix{Float64}(D*I, K, K)
 	S_C = Matrix{Float64}(D*I, K, D)
 
@@ -249,13 +262,13 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 		if (hpp_learn)
 			if (i%5 == 0) 
 				a, b = update_ab(hpp, exp_ρ, exp_log_ρ)
-				hpp = HPP(γ_n, a, b, zeros(K), Matrix{Float64}(I, K, K))
+				hpp = HPP(γ_n, a, b, hpp.μ_0, hpp.Σ_0)
 			end
 		end
 
 		if abs(elbo - elbo_prev) < tol
 			println("--- Stopped at iteration: $i ---")
-			el_s = el_s[1:iter]
+			el_s = el_s[1:i]
             break
 		end
 		
@@ -267,63 +280,23 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 		elbo_prev = elbo
 	end
 		
+	if debug
+		p = plot(el_s, title="ELBO progression")
+		display(p)
+	end
 	return exp_np, elbo_prev, el_s
 end
 
-function test_elbo(sd)
-	Random.seed!(sd)
-	T = 500
-	μ_0_t = zeros(2)
-	Σ_0_t = Diagonal(ones(2))
-	C_ = [1.0 0.0; 0.6 1.0; 0.3 0.2; 0.5 0.1; 0.1 0.3; 0.4 0.1; 0.8 0.2; 0.3 0.3; 0.4 0.6; 0.1 0.4] 
-	R_ = Diagonal(ones(10) .* 0.1)
-	y_10, x_2 = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R_, μ_0_t, Σ_0_t, T)
-
-	elbos = zeros(9)
-	for k in 1:9
-		γ = ones(k) .* 1000
-		a = 0.1
-		b = 0.1
-		μ_0 = zeros(k)
-		Σ_0 = Matrix{Float64}(I, k, k)
-		hpp = HPP(γ, a, b, μ_0, Σ_0)
-		exp_np, el = vb_ppca_c(y_10, hpp, true)
-		println("\nElBO, k=$k :", el)
-		elbos[k] = el
-		
-		if k == 2
-			println("K = $k")
-			ωs, _, _ = v_forward(y_10, exp_np, hpp)
-			println("latent x error: ", error_metrics(x_2, ωs))
-			println()
-
-			W = exp_np.C
-			WTW = W'*W
-			C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
-			y_recon = W*inv(WTW)*C*x_2
-			println("y recon error: ", error_metrics(y_10, y_recon))
-			println()
-		end
-	end
-
-	p = plot(elbos, xlabel = "K", ylabel = "ELBO", title = "ELBO comparison", label="")
-	vline!(p, [2], label="ground-truth", linestyle=:dash)
-	display(p)
-
-	p_ = plot(elbos[1:3], xlabel = "K", ylabel = "ELBO", title = "ELBO comparison", label="")
-	vline!(p_, [2], label="ground-truth", linestyle=:dash)
-	display(p_)
-end
-
-#test_elbo(123)
-
+""" TO-TEST: flat prior with random start
+"""
 function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
 	println("T = $max_T")
 	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2] 
-	R = Diagonal([0.5, 0.5, 0.5])
+	σ² = 5.0
+	R = Diagonal(ones(3) .* σ²)
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I, 2, 2)
+	Σ_0 = Matrix{Float64}(I * 1e5, 2, 2)
 
 	println("Ground-truth Loading Matrix W:")
 	show(stdout, "text/plain", C_)
@@ -353,16 +326,17 @@ function comp_ppca(max_T = 1000)
 		em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
 		println("reconstruction y error: ", error_metrics(y, em_y_recon))
 
-		M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
-		println("\n--- Bayes ---\n Loading Matrix W:")
-		show(stdout, "text/plain", loadings(M_bay))
-		println("\n\n", M_bay)
-		bay_x_pred = MultivariateStats.predict(M_bay, y)
-		println("latent x error: ", error_metrics(x_true, bay_x_pred))
-		bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
-		println("reconstruction y error: ", error_metrics(y, bay_y_recon))
+		# M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
+		# println("\n--- Bayes ---\n Loading Matrix W:")
+		# show(stdout, "text/plain", loadings(M_bay))
+		# println("\n\n", M_bay)
+		# bay_x_pred = MultivariateStats.predict(M_bay, y)
+		# println("latent x error: ", error_metrics(x_true, bay_x_pred))
+		# bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
+		# println("reconstruction y error: ", error_metrics(y, bay_y_recon))
 
-		hpp = HPP(ones(2) .* 10, 0.1, 0.1, μ_0, Σ_0)
+		# TO-TEST: flat prior
+		hpp = HPP(ones(2) .* 1e-6, 2, 1e-3, zeros(2), Matrix{Float64}(I * 1e7, 2, 2))
 		println("\n--- VBEM ---\n Loading Matrix W:")
 		exp_np, _ = vb_ppca_c(y, hpp, true)
 		show(stdout, "text/plain", exp_np.C)
@@ -373,13 +347,11 @@ function comp_ppca(max_T = 1000)
 		W = exp_np.C
 		WTW = W'*W
 		C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
-		y_recon = W*inv(WTW)*C*x_true
+		y_recon = W*inv(WTW + I * 1e-5)*C*x_true
 		println("y recon error: ", error_metrics(y, y_recon))
 		println("----- END Run seed: $sd -----\n")
 	end
 end
-
-#comp_ppca(1000)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -394,10 +366,14 @@ function out_txt(n)
 end
 
 """
-TO-DO: Compare ELBO for optimal K, convex optimisation? VI always reaches the same ELBO
+TO-DO: Compare ELBO for optimal K, 
+convex optimisation? ELBO is generally NON-CONVEX
+VI always reaches the same ELBO with fixed initialisations
+- Consider different random starts
+- MLE
 """
 
-function k_elbo_p3(y, n=10)
+function k_elbo_p3(y, n=1, hyper_optim=false)
 	elbos_k1 = zeros(n)
 	elbos_k2 = zeros(n)  
 
@@ -407,13 +383,13 @@ function k_elbo_p3(y, n=10)
 	for _ in 1:n
 
 		for k in 1:2
-			γ = ones(k) 
-			a = 0.5
-			b = 0.5
+			γ = ones(k) .* 1e-6
+			a = 2
+			b = 1e-3
 			μ_0 = zeros(k)
-			Σ_0 = Matrix{Float64}(I, k, k)
+			Σ_0 = Matrix{Float64}(I * 1e7, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
-			_, el = vb_ppca_c(y, hpp, true)
+			_, el = vb_ppca_c(y, hpp, hyper_optim, 3000)
 
 			if k == 1
 				elbos_k1[index_1] = el
@@ -438,28 +414,29 @@ function k_elbo_p3(y, n=10)
     display(p2)
 end
 
-function main()
+function main(n)
 	# P = 3, K = 2
 	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2]
-	σ² = 0.5
+	σ² = 5.0
 	R = Diagonal(ones(3) .* σ²)
 
 	println("Ground-truth Loading Matrix W:")
 	show(stdout, "text/plain", C_)
 	println("\nσ²: ", σ²)
-	y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal([1.0, 1.0]), 500)
-
+	y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal(ones(2)), n)
 	k_elbo_p3(y)
 end
 
 # for MNIST data
 function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
-	# γ = ones(2) .* 0.00000001
-	γ = ones(2)
-	a = 0.5
-	b = 2
+	# related to row-precision of C
+	γ = ones(2) .* 1e-6
+
+	# related to precision of R
+	a = 2
+	b = 1e-3
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I, 2, 2)
+	Σ_0 = Matrix{Float64}(I * 1e7, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
 	# early stop 
@@ -469,8 +446,6 @@ function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
 	display(p_el)
 	return exp_np.C
 end
-
-#main()
 
 #out_txt(500)
 
