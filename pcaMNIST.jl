@@ -15,7 +15,7 @@ pyplot()
 - package :em, :bayes option will not run
 - package default mle option agrees with standard pca
 
-Consider reduce EM iterations (early stop before iter 200),
+Consider reduce EM iterations (early stop before iter 100, 50, 30, 10),
 
 Consider standardise data? (get rid of the 0s from the white pixels)
 """
