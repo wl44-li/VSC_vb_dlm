@@ -1,6 +1,9 @@
 include("kl_optim.jl")
 include("turing_ll.jl")
 include("test_data.jl")
+
+module LocalLevel
+
 begin
 	using Distributions, Random
 	using LinearAlgebra
@@ -10,6 +13,8 @@ begin
 	using DataFrames
 	using StatsPlots
 end
+
+export gen_data
 
 function gen_data(A, C, Q, R, m_0, C_0, T)
 	println("Data gen for local level")
@@ -25,6 +30,8 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
 		y[t] = C * x[t+1] + sqrt(R) * randn()
 	end
 	return y, x
+end
+
 end
 
 begin
@@ -66,7 +73,7 @@ function test_rq(rnd, T=100)
 	println("Ground-truth r = $R, q = $Q")
 
 	Random.seed!(rnd)
-	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, T)
 	r = sample_r(x_true, y, 1.0, 2.0, 0.001)
 	println("Sample r = $r")
 	q = sample_q(x_true, 1.0, 2.0, 0.001)
@@ -402,7 +409,11 @@ end
 function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5)
 
 	"""
-	Random initilisations?
+	Random initilisation
+
+	- MLE
+
+	- Gibbs Run 1
 	"""
 	hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 

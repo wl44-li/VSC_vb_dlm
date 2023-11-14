@@ -1,4 +1,6 @@
 include("kl_optim.jl")
+module LinearGrowth
+
 begin
 	using Distributions, Random
 	using LinearAlgebra
@@ -13,6 +15,8 @@ begin
 	using DataFrames
 	using StateSpaceModels
 end
+
+export gen_data
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	K, _ = size(A) # K = 2
@@ -30,6 +34,8 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	end
 
 	return y, x
+end
+
 end
 
 """
@@ -126,7 +132,7 @@ function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64,
     return HSS(W_C, W_A, S_C, S_A), μ_s[:, 1], Σ_s[:, :, 1], log_Z
 end
 
-function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=100)
+function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, max_iter=500)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
 	E_R_inv, E_Q_inv = missing, missing
 
@@ -135,10 +141,10 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 		hss, _, _, _ = vb_e_step(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
 	end
 	
-	return E_R_inv, E_Q_inv
+	return inv(E_R_inv), inv(E_Q_inv)
 end
 
-function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=5e-4)
+function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-6)
 	D, _ = size(y)
 	K = size(A, 1)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
@@ -211,10 +217,10 @@ end
 function test_Gibbs_RQ(rnd, T = 100)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q_lg = Diagonal([10.0, 15.0])
+	Q_lg = Diagonal([100.0, 5.0])
 	R_lg = [30.0]
 	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([100.0, 1000.0])
+	Σ_0 = Diagonal([1000.0, 1000.0])
 	println("R True:")
 	show(stdout, "text/plain", R_lg)
 	println()
@@ -223,7 +229,7 @@ function test_Gibbs_RQ(rnd, T = 100)
 	println()
 
 	Random.seed!(rnd)
-	y, x_true = gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
+	y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, T)
 	prior = Q_Gamma(2, 0.001, 2, 0.001)
 
 	R = sample_R(x_true, y, C_lg, prior.a, prior.b)
@@ -283,35 +289,35 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
 	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
-	
-	try
-		X[:, end] = rand(MvNormal(ms[:, end], Cs[:, :, end]))
-	catch PosDefException
-		println("PosDefException at t=$T")
-		U, Σ, V = svd(Cs[:, :, end])
-		H_T = U * diagm(Σ) * V'
- 		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(H_T)))
-	end
+	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
+	# try
+	# 	X[:, end] = rand(MvNormal(ms[:, end], Cs[:, :, end]))
+	# catch PosDefException
+	# 	println("PosDefException at t=$T")
+	# 	U, Σ, V = svd(Cs[:, :, end])
+	# 	H_T = U * diagm(Σ) * V'
+ 	# 	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(H_T)))
+	# end
 
 	for t in T:-1:1 # backward sampling
 		C_t = Cs[:, :, t]
-		# U_c, Σ_c, V_c = svd(Cs[:, :, t])
-		# C_t = U_c * diagm(Σ_c) * V_c'
-
 		h_t = ms[:, t] + C_t * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = C_t - C_t * A' * inv(Rs[:, :, t]) * A * C_t
 		
-		try
-			U, Σ, V = svd(H_t)
-			H_t = U * diagm(Σ) * V'
-			X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
-		catch PosDefException
-			println("PosDefException at t=$t")
-			# println("\tH_t ", H_t)
-			# U, Σ, V = svd(H_t)
-			# H_t = U * diagm(Σ) * V'
-			# println("\tH_t (svd)", H_t)
-		end
+		lambda = 5e-6
+		H_t = H_t + lambda * I
+		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+		# try
+		# 	U, Σ, V = svd(H_t)
+		# 	H_t = U * diagm(Σ) * V'
+		# 	X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+		# catch PosDefException
+		# 	println("PosDefException at t=$t")
+		# 	# println("\tH_t ", H_t)
+		# 	# U, Σ, V = svd(H_t)
+		# 	# H_t = U * diagm(Σ) * V'
+		# 	# println("\tH_t (svd)", H_t)
+		# end
 	end
 
 	return X
@@ -363,7 +369,7 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show_pl
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e3, K, K))
+	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I * 1e6, K, K))
 	n_samples = Int.(mcmc/thin)
 
 	println("--- MCMC ---")
@@ -425,25 +431,26 @@ end
 """
 On-going Gibbs debug, PosDefException for back sample at t=2, need to use SVD !
 """
-# A_lg = [1.0 1.0; 0.0 1.0]
-# C_lg = [1.0 0.0]
-# Q = Diagonal([1.0, 1.0])
-# R = [10.0]
-# K = size(A_lg, 1)
-# Random.seed!(111)
-# y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 500)
-# test_gibbs(y, x_true, 5000, 1000, 1)
+A_lg = [1.0 1.0; 0.0 1.0]
+C_lg = [1.0 0.0]
+Q = Diagonal([10.0, 1.0])
+R = [10.0]
+K = size(A_lg, 1)
+Random.seed!(10)
+y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K) .* 1000), 1000)
+#test_gibbs(y, x_true, 20000, 5000, 5)
+#test_vb(y, x_true)
 
 function test_vb(y, x_true, hyperoptim=false, show_plot=false)
 	T = size(y, 2)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e6, K, K))
 	println("--- VBEM ---")
 
 	println("\nHyper-param optimisation: $hyperoptim")
-	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim)
+	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim, 200)
 
 	μs_f, σs_f2, A_s, Rs, _ = forward_(y, A_lg, C_lg, R, Q, prior)
 	μs_s, Σ_s, _ = backward_(A_lg, μs_f, σs_f2, A_s, Rs)
@@ -623,7 +630,7 @@ function out_txt(n)
 	end
 end
 
-out_txt(500)
+#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

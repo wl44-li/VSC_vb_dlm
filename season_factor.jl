@@ -248,7 +248,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
         end
 
         if gen_fun == "LL"
-            y, x_true = gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
+            y, x_true = LocalLevel.gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
             hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
             _, _, el_ll, _ = vb_ll_c(y, hpp_ll)
             elbo_ll[i] = el_ll[end]
@@ -276,7 +276,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
             K = size(A_lg, 1)
             μ_0 = zeros(K)
             Σ_0 = Diagonal(ones(K))
-            y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
+            y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
             prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
             _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
             elbo_lg[i] = el_lg[end]
@@ -306,8 +306,8 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
     display(p)
 end
 
+#vi_elbo_comp("S")
+
+#vi_elbo_comp("LL")
+
 vi_elbo_comp("LT")
-
-vi_elbo_comp("LL")
-
-vi_elbo_comp("S")
