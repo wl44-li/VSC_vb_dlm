@@ -93,7 +93,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     # end
 
     if method == "vbem"
-        C = vb_ppca_k2(y, 500, false)
+        C = vb_ppca_k2(y, 50, false)
         M = svd(C).U
     end
 
@@ -106,33 +106,33 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     display(p)
 end
 
-#test_MNIST(100, true, "vbem")
+test_MNIST(100, true, "vbem")
 #test_MNIST()
 
 """
-On-going PPCA-VB DEBUG
+On-going PPCA-VB Testing
 
 - ELBO heading down?
 - prior choices?
 - D = 28 x 28, K = 2
 """
 
-train_y, train_labels = MNIST(split=:train)[:]
+# train_y, train_labels = MNIST(split=:train)[:]
 
 #train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
 
-T = size(train_y, 3)
-y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
+# T = size(train_y, 3)
+# y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 
-y = zscore(y, 1)
+# y = zscore(y, 1)
 
 # pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
 # M = projection(pca)
 
-C = vb_ppca_k2(y, 500, false)
-M = svd(C).U
+# C = vb_ppca_k2(y, 500, false)
+# M = svd(C).U
 
-compare_0(train_y, train_labels, M)
+# compare_0(train_y, train_labels, M)
 
 # plots = []
 

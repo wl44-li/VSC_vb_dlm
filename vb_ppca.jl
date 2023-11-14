@@ -64,7 +64,7 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	    q_ρ = Gamma.(a_s, 1 ./ b_s)
 	catch err
 	    if isa(err, DomainError)
-	        println("--- DomainError occurred: check that a_s and b_s are positive values")
+	        println("--- DomainError occurred with Gamma Distribution")
 			# println("\ta_s: ", a_s[1])
 			# println("\tb_s: ", b_s)
 			b_s = abs.(b_s)
