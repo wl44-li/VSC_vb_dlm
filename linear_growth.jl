@@ -24,9 +24,9 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	x = zeros(K, T+1)
 	y = zeros(D, T) # D = 1
 
-	x[:, 1] = zeros(K)
+	x[:, 1] = μ_0
 	x[:, 2] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
-	y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
+	y[:, 1] = C * x[:, 2] + rand(MvNormal(zeros(D), sqrt.(R)))
 
 	for t in 2:T
 		x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
@@ -144,7 +144,7 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 	return inv(E_R_inv), inv(E_Q_inv)
 end
 
-function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-6)
+function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-4)
 	D, _ = size(y)
 	K = size(A, 1)
 	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
@@ -183,6 +183,64 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	end
 	
 	return inv(E_R_inv), inv(E_Q_inv), el_s, Q_gam
+end
+
+function test_vb(y, x_true, hyperoptim=false; show_plot=false)
+	T = size(y, 2)
+	A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+	K = size(A_lg, 1)
+	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e6, K, K))
+	println("--- VBEM ---")
+
+	println("\nHyper-param optimisation: $hyperoptim")
+	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim, 200)
+
+	μs_f, σs_f2, A_s, Rs, _ = forward_(y, A_lg, C_lg, R, Q, prior)
+	μs_s, Σ_s, _ = backward_(A_lg, μs_f, σs_f2, A_s, Rs)
+	
+	println("\nVB q(R):")
+	show(stdout, "text/plain", R)
+	println("\n\nVB q(Q):")
+	show(stdout, "text/plain", Q)
+	println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+
+	vars = hcat([diag(Σ_s[:, :, t]) for t in 1:T+1]...)
+	stds = sqrt.(vars)
+
+	if show_plot
+		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		display(p)
+		sleep(1)
+
+		plots = plot_x_itvl(μs_s, stds, x_true, 20)
+		for i in 1:K
+			pl = plots[i]
+			title!(pl, "VB, hyper-param optim:$t")
+			display(pl)
+			sleep(1)
+		end
+	end
+	return μs_s, stds, Q_gam
+end
+
+function test_mle(y, x_true = nothing)
+	println("--- MLE ---")
+	mle_lg = LocalLinearTrend(vec(y))
+	StateSpaceModels.fit!(mle_lg)
+	print_results(mle_lg)
+
+	fm = get_filtered_state(mle_lg)
+	sm = get_smoothed_state(mle_lg)
+
+	if x_true !== nothing
+		filter_err = error_metrics(x_true[:, 2:end], fm')
+		smooth_err = error_metrics(x_true[:, 2:end], sm')
+		println("\nMLE Filtered MSE, MAD: ", filter_err)
+		println("MLE Smoother MSE, MAD: ", smooth_err)
+	end
 end
 
 """
@@ -289,7 +347,9 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
 	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
-	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
+
+	lambda = 5e-6
+	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end] + lambda * I)))
 	# try
 	# 	X[:, end] = rand(MvNormal(ms[:, end], Cs[:, :, end]))
 	# catch PosDefException
@@ -303,10 +363,7 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 		C_t = Cs[:, :, t]
 		h_t = ms[:, t] + C_t * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = C_t - C_t * A' * inv(Rs[:, :, t]) * A * C_t
-		
-		lambda = 5e-6
-		H_t = H_t + lambda * I
-		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
+		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t + lambda * I)))
 		# try
 		# 	U, Σ, V = svd(H_t)
 		# 	H_t = U * diagm(Σ) * V'
@@ -327,7 +384,7 @@ end
 Check FFBS in Linear Growth [ Compare with DLM with R ]
 """
 
-function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, debug=false)
+function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1; debug=false)
 	P, T = size(y)
 	K = size(A, 2)
 	
@@ -365,7 +422,7 @@ function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1, d
 	return samples_X, samples_Q, samples_R
 end
 
-function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
+function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_plot=false)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
@@ -437,50 +494,10 @@ Q = Diagonal([10.0, 1.0])
 R = [10.0]
 K = size(A_lg, 1)
 Random.seed!(10)
-y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K) .* 1000), 1000)
-#test_gibbs(y, x_true, 20000, 5000, 5)
+y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K) .* 1e7), 1000)
+#test_mle(y, x_true)
+test_gibbs(y, x_true, 20000, 5000, 1)
 #test_vb(y, x_true)
-
-function test_vb(y, x_true, hyperoptim=false, show_plot=false)
-	T = size(y, 2)
-	A_lg = [1.0 1.0; 0.0 1.0]
-    C_lg = [1.0 0.0]
-	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e6, K, K))
-	println("--- VBEM ---")
-
-	println("\nHyper-param optimisation: $hyperoptim")
-	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim, 200)
-
-	μs_f, σs_f2, A_s, Rs, _ = forward_(y, A_lg, C_lg, R, Q, prior)
-	μs_s, Σ_s, _ = backward_(A_lg, μs_f, σs_f2, A_s, Rs)
-	
-	println("\nVB q(R):")
-	show(stdout, "text/plain", R)
-	println("\n\nVB q(Q):")
-	show(stdout, "text/plain", Q)
-	println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
-
-	vars = hcat([diag(Σ_s[:, :, t]) for t in 1:T+1]...)
-	stds = sqrt.(vars)
-
-	if show_plot
-		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
-		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
-		display(p)
-		sleep(1)
-
-		plots = plot_x_itvl(μs_s, stds, x_true, 20)
-		for i in 1:K
-			pl = plots[i]
-			title!(pl, "VB, hyper-param optim:$t")
-			display(pl)
-			sleep(1)
-		end
-	end
-	return μs_s, stds, Q_gam
-end
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -549,21 +566,8 @@ function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param = nothing, x_lmin = 0.0
 	return τ_q
 end
 
-function comp_vb_mle(y, x_true, hyperoptim=false)
-	println("--- MLE ---")
-	mle_lg = LocalLinearTrend(vec(y))
-	StateSpaceModels.fit!(mle_lg)
-	print_results(mle_lg)
-
-	fm = get_filtered_state(mle_lg)
-	filter_err = error_metrics(x_true[:, 2:end], fm')
-
-	sm = get_smoothed_state(mle_lg)
-	smooth_err = error_metrics(x_true[:, 2:end], sm')
-
-	println("\nMLE Filtered MSE, MAD: ", filter_err)
-	println("MLE Smoother MSE, MAD: ", smooth_err)
-	println()
+function comp_vb_mle(y, x_true = nothing, hyperoptim=false)
+	test_mle(y, x_true)
 	xm_vb, std_vb, Q_gam = test_vb(y, x_true, hyperoptim)
 	return xm_vb, std_vb, Q_gam
 end

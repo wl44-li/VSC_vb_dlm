@@ -17,11 +17,10 @@ end
 export gen_data
 
 function gen_data(A, C, Q, R, m_0, C_0, T)
-	println("Data gen for local level")
 	x = zeros(T+1)
 	y = zeros(T)
 	
-	x[1] = 0 # assume x_0 is 0
+	x[1] = m_0 # can assume x_0 is 0
 	x[2] = rand(Normal(A*m_0, sqrt(A*C_0*A + Q)))
 	y[1] = rand(Normal(C*x[2], sqrt(R)))
 
@@ -69,7 +68,7 @@ end
 
 function test_rq(rnd, T=100)
 	R = 1.0
-	Q = 1.0
+	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
 
 	Random.seed!(rnd)
@@ -182,7 +181,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	return samples_x, samples_q, samples_r
 end
 
-function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1, show_plot=false)
+function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_plot=false)
 	n_samples = Int.(mcmc/thin)
 	println("--- MCMC ---")
 	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, mcmc, burn_in, thin)
@@ -281,6 +280,7 @@ function vb_m_ll(y, hss::HSS_ll, priors::Priors_ll)
     E_τ_r = α_r_p / β_r_p
     E_τ_q = α_q_p / β_q_p
 
+	# DEBUG R posterior
     return E_τ_r, E_τ_q, qθ(α_r_p, β_r_p, α_q_p, β_q_p)
 end
 
@@ -303,9 +303,9 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     for t in 1:T
         a_s[t] = a_t = a * μ_f[t]
         rs[t] = r_t = a * σ_f[t] * a + 1/E_τ_q # Q
+
 		f_t = c * a_t
 		q_t = c * r_t * c + 1/E_τ_r # R
-
 		log_z += logpdf(Normal(f_t, sqrt(q_t)), y[t])
 
 		# m_t, C_t Kalman Filter
@@ -345,8 +345,11 @@ function vb_e_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
 
     # Compute the sufficient statistics
     w_c = sum(σs_s[2:end] .+ μs_s[2:end].^2)
+
     w_a = sum(σs_s[1:end-1] .+ μs_s[1:end-1].^2)
-    s_c = sum(y .* μs_s[2:end])
+
+    s_c = sum(μs_s[2:end] .* y')
+ 
     s_a = sum(σs_s_cross) + sum(μs_s[1:end-1] .* μs_s[2:end])
 
     # Return the sufficient statistics in a HSS struct
@@ -406,24 +409,57 @@ function update_ab(hpp::Priors_ll, qθ)
 	return a_r, b_r, a_q, b_q
 end
 
-function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5)
-
+function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5; init="gibbs", debug=false)
 	"""
 	Random initilisation
 
-	- MLE
+	- MLE results r, q, randomness with normal(mle_mean, mle_std)
 
 	- Gibbs Run 1
-	"""
-	hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 
+	- R error -> hss computation -> y too -ve?
+	"""
 	E_τ_r, E_τ_q  = missing, missing
-	elbo_prev = -Inf
-	el_s = zeros(max_iter)
-	qθ = missing
+	elbo_prev, el_s = -Inf, zeros(max_iter)
+	hss, qθ = missing, missing
+
+	if init == "mle"
+		model = StateSpaceModels.LocalLevel(y)
+		StateSpaceModels.fit!(model)	
+		results = model.results
+
+		mle_ms = results.coef_table.coef
+		mle_stds = results.coef_table.std_err
+		println(mle_ms, mle_stds)
+
+		r_init, q_init = rand(Normal(mle_ms[1], mle_stds[1])), rand(Normal(mle_ms[2], mle_stds[2]))
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+	end
+
+	if init == "gibbs"
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
+		r_init, q_init = sr[1], sq[1]
+
+		if debug
+			println("Q_init: ", q_init)
+			println("R_init: ", r_init)		
+		end
+
+		r_init, q_init = 1.0, 1.0
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+	end
+
 
 	for i in 1:max_iter
-		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)		
+		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)
+
+		if debug
+			println("iter $i: ")
+			println("Q: ", 1/E_τ_q)
+			println("R: ", 1/E_τ_r)
+			println(qθ)
+		end
+
 		hss, μs_0, σs_s0, log_z = vb_e_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, hpp)
 
 		kl_ga = kl_gamma(hpp.α_r, hpp.β_r, qθ.α_r_p, qθ.β_r_p) + kl_gamma(hpp.α_q, hpp.β_q, qθ.α_q_p, qθ.β_q_p)
@@ -498,16 +534,16 @@ function plot_CI_ll(μ_s, σ_s2, x_true = nothing, max_T = 30)
 	return p
 end
 
-function test_vb_ll(y, x_true = nothing, hyperoptim = false, show_plot = false)
+function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 
 	"""
 	*** Prior choice and initilisation of VB
 	"""
-	hpp_ll = Priors_ll(2, 0.001, 2, 0.001, 0.0, 1e7)
+	hpp_ll = Priors_ll(2, 0.001, 2, 0.001, 0.0, 1.0)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
-	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim)
+	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim, debug = true)
 
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs)
@@ -526,7 +562,7 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false, show_plot = false)
 		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
 		display(p)
 
-		x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true)
+		x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true, length(y))
 		title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
 		display(x_plot)
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
@@ -537,9 +573,13 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false, show_plot = false)
 end
 
 function test_MLE(y, x_true = nothing)
-	model = LocalLevel(y)
-	StateSpaceModels.fit!(model) # MLE and uni-variate kalman filter
+	model = StateSpaceModels.LocalLevel(y)
+	StateSpaceModels.fit!(model)
 	print_results(model)
+
+	# results = model.results
+	# println(results.coef_table.coef)
+	# println(results.coef_table.std_err)
 
 	if x_true !== nothing
 		fm = get_filtered_state(model)
@@ -559,25 +599,28 @@ function test_nile()
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
-	T = length(y)
-	Random.seed!(123)
 
-	Xs = zeros(T, 1000)
-	for iter in 1:1000
-		# DLM with R set c_0 to 1e7
-		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
-		Xs[:, iter] = xs[2:end]
-	end
+	y_var = var(y)
+	println("observation var: ", y_var)
+	# T = length(y)
+	# Random.seed!(123)
 
-	# FFBS agrees with DLM with R!
-	x_std = std(Xs, dims=2)[:]
-	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
-	display(p)
+	# Xs = zeros(T, 1000)
+	# for iter in 1:1000
+	# 	# DLM with R set c_0 to 1e7
+	# 	xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
+	# 	Xs[:, iter] = xs[2:end]
+	# end
+
+	# # FFBS agrees with DLM with R!
+	# x_std = std(Xs, dims=2)[:]
+	# p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
+	# display(p)
 
 	# Gibbs agrees with DLM with R
-	test_gibbs_ll(y, nothing, 1500, 0, 1, true)
+	test_gibbs_ll(y, show_plot = false)
 	test_MLE(y)
-	#test_vb_ll(y, nothing, true)
+	#test_vb_ll(y, nothing)
 end
 
 #test_nile()
@@ -617,8 +660,6 @@ function main(max_T)
 	end
 end
 
-#main(500)
-
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
@@ -626,7 +667,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 	Random.seed!(sd)
-	y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 10.0, 1.0, max_T)
 
 	"""
 	Choice of Gibbs, NUTS, HMC
@@ -634,7 +675,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1, true)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 5000, 1000, 1, show_plot=true)
 	end
 
 	if sampler == "hmc" #turing
@@ -645,7 +686,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
 	
-	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, false, true)
+	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, false, show_plot = true)
 
 	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1.0), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1.0)
 	display(plot_r)
@@ -662,9 +703,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p2)
 end
 
-#main_graph(239, 500, "gibbs")
-
-# main_graph(111, 100, "nuts")
+#main_graph(10, 200, "gibbs")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -677,8 +716,6 @@ function out_txt(n)
 		end
 	end
 end
-
-#out_txt(200)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

@@ -10,6 +10,7 @@ begin
 end
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	Random.seed!(103)
 	K, _ = size(A)
 	D, _ = size(C)
 	x = zeros(K, T)
@@ -231,7 +232,7 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=300)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=5e-6; debug = false)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; debug = false)
 	D, _ = size(ys)
 	K = length(hpp.γ)
 	
@@ -373,7 +374,7 @@ VI always reaches the same ELBO with fixed initialisations
 - MLE
 """
 
-function k_elbo_p3(y, n=1, hyper_optim=false)
+function k_elbo_p3(y, n=1, hyper_optim=true)
 	elbos_k1 = zeros(n)
 	elbos_k2 = zeros(n)  
 
@@ -389,7 +390,7 @@ function k_elbo_p3(y, n=1, hyper_optim=false)
 			μ_0 = zeros(k)
 			Σ_0 = Matrix{Float64}(I * 1e7, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
-			_, el = vb_ppca_c(y, hpp, hyper_optim, 3000)
+			_, el = vb_ppca_c(y, hpp, hyper_optim)
 
 			if k == 1
 				elbos_k1[index_1] = el
@@ -406,18 +407,18 @@ function k_elbo_p3(y, n=1, hyper_optim=false)
 	println(elbos_k1)
 	println(elbos_k2)
 
-	groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
-	all_elbos = vcat(elbos_k1, elbos_k2)
+	# groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
+	# all_elbos = vcat(elbos_k1, elbos_k2)
 
-	p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange], label="", ylabel="ELBO", legend=false)
-	title!(p2, "ELBO Model Selection, K=2")
-    display(p2)
+	# p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange], label="", ylabel="ELBO", legend=false)
+	# title!(p2, "ELBO Model Selection, K=2")
+    # display(p2)
 end
 
 function main(n)
 	# P = 3, K = 2
 	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2]
-	σ² = 5.0
+	σ² = 0.5
 	R = Diagonal(ones(3) .* σ²)
 
 	println("Ground-truth Loading Matrix W:")
@@ -447,6 +448,8 @@ function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
 	return exp_np.C
 end
 
+# hyper-optim -> true, K=2 elbo re-create
+#main(2000)
 #out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
