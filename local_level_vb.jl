@@ -8,7 +8,6 @@ begin
 	using Distributions, Random
 	using LinearAlgebra
 	using SpecialFunctions
-	using StateSpaceModels
 	using MCMCChains
 	using DataFrames
 	using StatsPlots
@@ -20,7 +19,7 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
 	x = zeros(T+1)
 	y = zeros(T)
 	
-	x[1] = m_0 # can assume x_0 is 0
+	x[1] = m_0 
 	x[2] = rand(Normal(A*m_0, sqrt(A*C_0*A + Q)))
 	y[1] = rand(Normal(C*x[2], sqrt(R)))
 
@@ -154,7 +153,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	m_0, c_0 = 0.0, 1e7  # Prior DLM with R setting
 	
 	α = 2  # Shape for Gamma prior
-	β = 0.0001  # rate for Gamma prior
+	β = 1e-3  # rate for Gamma prior
 	
 	# Initial values for the parameters, akin to dlm with R
 	r = 1.0
@@ -270,10 +269,11 @@ function vb_m_ll(y, hss::HSS_ll, priors::Priors_ll)
 
     # Update parameters for τ_r
     α_r_p = priors.α_r + T / 2
-    β_r_p = priors.β_r + 0.5 * (y' * y - 2 * hss.s_c + hss.w_c)
-
-    # Update parameters for τ_q
-    α_q_p = priors.α_q + T / 2
+    #β_r_p = priors.β_r + 0.5 * (y' * y - 2 * hss.s_c + hss.w_c)
+	β_r_p = priors.β_r + 0.5 * (y' * y - hss.s_c^2/hss.w_c)
+    
+	# Update parameters for τ_q
+    α_q_p = priors.α_q + (T-1) / 2
     β_q_p = priors.β_q + 0.5 * (hss.w_a + hss.w_c - 2 * hss.s_a)
 
     # Compute expectations
@@ -316,7 +316,7 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     return μ_f, σ_f, a_s, rs, log_z
 end
 
-function backward_ll(a, μ_f, σ_f, a_s, rs)
+function backward_ll(a, μ_f, σ_f, a_s, rs, E_τ_q)
     T = length(μ_f) - 1
     μ_s = similar(μ_f)
     σ_s = similar(σ_f)
@@ -329,8 +329,8 @@ function backward_ll(a, μ_f, σ_f, a_s, rs)
 		μ_s[t] = μ_f[t] + σ_f[t] * a * (1/rs[t]) * (μ_s[t+1] - a_s[t])
 		σ_s[t] = σ_f[t] - σ_f[t] * a * (1/rs[t]) * (rs[t] - σ_s[t+1]) * (1/rs[t]) * a * σ_f[t]
 
-		σ_t_ = 1 / (( 1 / σ_f[t] ) + a*a )
-		σ_s_cross[t] =  σ_t_ * a * σ_s[t+1]
+		J_t = σ_f[t] / (σ_f[t] + 1/E_τ_q)	
+		σ_s_cross[t] = J_t * σ_s[t+1]
     end
 	
     return μ_s, σ_s, σ_s_cross
@@ -341,15 +341,15 @@ function vb_e_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
     μs_f, σs_f, a_s, rs, log_Z = forward_ll(y, a, c, E_τ_r, E_τ_q, priors)
 
     # Backward pass (smoother)
-    μs_s, σs_s, σs_s_cross = backward_ll(a, μs_f, σs_f, a_s, rs)
+    μs_s, σs_s, σs_s_cross = backward_ll(a, μs_f, σs_f, a_s, rs, E_τ_q)
 
     # Compute the sufficient statistics
     w_c = sum(σs_s[2:end] .+ μs_s[2:end].^2)
 
     w_a = sum(σs_s[1:end-1] .+ μs_s[1:end-1].^2)
-
-    s_c = sum(μs_s[2:end] .* y')
  
+	s_c = sum(y .* μs_s[2:end])
+
     s_a = sum(σs_s_cross) + sum(μs_s[1:end-1] .* μs_s[2:end])
 
     # Return the sufficient statistics in a HSS struct
@@ -409,7 +409,8 @@ function update_ab(hpp::Priors_ll, qθ)
 	return a_r, b_r, a_q, b_q
 end
 
-function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-5; init="gibbs", debug=false)
+using StateSpaceModels
+function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=false)
 	"""
 	Random initilisation
 
@@ -417,55 +418,98 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 
 	- Gibbs Run 1
 
-	- R error -> hss computation -> y too -ve?
+	- Observation variance 
+
 	"""
+
 	E_τ_r, E_τ_q  = missing, missing
 	elbo_prev, el_s = -Inf, zeros(max_iter)
 	hss, qθ = missing, missing
 
 	if init == "mle"
+		println("--- Using MLE initilaize ---")
 		model = StateSpaceModels.LocalLevel(y)
 		StateSpaceModels.fit!(model)	
 		results = model.results
-
 		mle_ms = results.coef_table.coef
-		mle_stds = results.coef_table.std_err
-		println(mle_ms, mle_stds)
+		mle_sterrs = results.coef_table.std_err
+		# println(mle_ms, mle_sterrs)
 
-		r_init, q_init = rand(Normal(mle_ms[1], mle_stds[1])), rand(Normal(mle_ms[2], mle_stds[2]))
+		mle_estimate_R = mle_ms[1] # MLE estimate for R
+		mle_estimate_Q = mle_ms[2] # MLE estimate for Q
+		se_R = mle_sterrs[1] # Standard error for R
+		se_Q = mle_sterrs[2] # Standard error for Q
+
+		# For R
+		alpha_R = (mle_estimate_R / se_R)^2
+		theta_R = se_R^2 / mle_estimate_R
+		r_init = rand(Gamma(alpha_R, theta_R))
+
+		# For Q
+		alpha_Q = (mle_estimate_Q / se_Q)^2
+		theta_Q = se_Q^2 / mle_estimate_Q
+		q_init = rand(Gamma(alpha_Q, theta_Q))
+
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+		if debug
+			println("Q_init: ", q_init)
+			println("R_init: ", r_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
 	end
 
 	if init == "gibbs"
+		println("--- Using Gibbs 1-step initilaize ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
 		r_init, q_init = sr[1], sq[1]
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 
 		if debug
 			println("Q_init: ", q_init)
-			println("R_init: ", r_init)		
+			println("R_init: ", r_init)
+			println("w_c, w_a, s_c, s_a :", hss)
 		end
-
-		r_init, q_init = 1.0, 1.0
-		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 	end
 
+	if init == "obs"
+		y_var = var(y)
+		r_init = y_var * (1 + randn() * 0.3) 
+		q_init = y_var * (1 + randn() * 0.3)
+
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+
+		if debug
+			println("Q_init: ", q_init)
+			println("R_init: ", r_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
+	end
+
+	if init == "fixed"
+		println("--- Fixed Start ---")
+		hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
+	end
 
 	for i in 1:max_iter
 		E_τ_r, E_τ_q, qθ = vb_m_ll(y, hss, hpp)
-
-		if debug
-			println("iter $i: ")
-			println("Q: ", 1/E_τ_q)
-			println("R: ", 1/E_τ_r)
-			println(qθ)
-		end
-
 		hss, μs_0, σs_s0, log_z = vb_e_ll(y, 1.0, 1.0, E_τ_r, E_τ_q, hpp)
 
-		kl_ga = kl_gamma(hpp.α_r, hpp.β_r, qθ.α_r_p, qθ.β_r_p) + kl_gamma(hpp.α_q, hpp.β_q, qθ.α_q_p, qθ.β_q_p)
-		elbo = log_z - kl_ga
+		kl_r = kl_gamma(hpp.α_r, hpp.β_r, qθ.α_r_p, qθ.β_r_p)
+		kl_q = kl_gamma(hpp.α_q, hpp.β_q, qθ.α_q_p, qθ.β_q_p)
+		elbo = log_z - kl_r - kl_q
 		el_s[i] = elbo
 		
+		if debug
+			println("\nVB iter $i: ")
+			println("\tQ: ", 1/E_τ_q)
+			println("\tR: ", 1/E_τ_r)
+			println("\tα_r, β_r, α_q, β_q: ", qθ)
+			println("\tLog Z: ", log_z)
+			println("\tKL q: ", kl_q)
+			println("\tKL r: ", kl_r)
+			println("\tElbo $i: ", elbo)
+		end
+
 		if abs(elbo - elbo_prev) < tol
 			println("Stopped at iteration: $i")
 			el_s = el_s[1:i]
@@ -539,14 +583,14 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 	"""
 	*** Prior choice and initilisation of VB
 	"""
-	hpp_ll = Priors_ll(2, 0.001, 2, 0.001, 0.0, 1.0)
+	hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e7)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
-	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim, debug = true)
+	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim, init="gibbs")
 
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
-	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs)
+	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	x_std = sqrt.(σs_s)
 
 	println("\nVB q(r) mode: ", r)
@@ -562,15 +606,29 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
 		display(p)
 
-		x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true, length(y))
-		title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
-		display(x_plot)
+		#x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true, length(y))
+		#title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
+		#display(x_plot)
 		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
 		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
 	return μs_s, x_std, q_rq
 end
+
+# max_T = 200
+# R = 10.0
+# Q = 10.0
+# println("Ground-truth r = $R, q = $Q")
+# Random.seed!(123)
+# y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
+# hpp_ll = Priors_ll(0.5, 0.5, 0.5, 0.5, 0.0, 1.0)
+# r, q, els, q_rq = vb_ll_c(y, hpp_ll, init="fixed", debug=true)
+# println("\nVB q(r) mode: ", r)
+# println("VB q(q) mode: ", q)
+# p = plot(els, label = "elbo")
+# display(p)
+
 
 function test_MLE(y, x_true = nothing)
 	model = StateSpaceModels.LocalLevel(y)
@@ -593,37 +651,40 @@ function test_MLE(y, x_true = nothing)
 	end
 end
 
-function test_nile()
+function test_Nile_ffbs()
+	y = get_Nile()
+	y = vec(y)
+	y = Float64.(y)
 	R = 15099.8
 	Q = 1468.4
+	T = length(y)
+	Random.seed!(10)
+
+	Xs = zeros(T, 1000)
+	for iter in 1:1000
+		# DLM with R set c_0 to 1e7
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
+		Xs[:, iter] = xs[2:end]
+	end
+
+	# FFBS agrees with DLM with R!
+	x_std = std(Xs, dims=2)[:]
+	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
+	display(p)
+end
+
+function test_nile()
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
 
-	y_var = var(y)
-	println("observation var: ", y_var)
-	# T = length(y)
-	# Random.seed!(123)
-
-	# Xs = zeros(T, 1000)
-	# for iter in 1:1000
-	# 	# DLM with R set c_0 to 1e7
-	# 	xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
-	# 	Xs[:, iter] = xs[2:end]
-	# end
-
-	# # FFBS agrees with DLM with R!
-	# x_std = std(Xs, dims=2)[:]
-	# p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
-	# display(p)
-
 	# Gibbs agrees with DLM with R
-	test_gibbs_ll(y, show_plot = false)
 	test_MLE(y)
-	#test_vb_ll(y, nothing)
+	test_gibbs_ll(y, nothing, 10000, 1000, 5, show_plot = true)
+	test_vb_ll(y, show_plot = true)
 end
 
-#test_nile()
+test_nile()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -663,11 +724,13 @@ end
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
-	R = 1.0
-	Q = 1.0
+	R = 10.0
+	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
 	Random.seed!(sd)
-	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 10.0, 1.0, max_T)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
+
+	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, true, show_plot = true)
 
 	"""
 	Choice of Gibbs, NUTS, HMC
@@ -675,7 +738,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 5000, 1000, 1, show_plot=true)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1, show_plot=true)
 	end
 
 	if sampler == "hmc" #turing
@@ -685,10 +748,8 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	if sampler == "nuts" #turing
 		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
-	
-	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, false, show_plot = true)
 
-	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1.0), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1.0)
+	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1/R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1/Q)
 	display(plot_r)
 	display(plot_q)
 
@@ -703,7 +764,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p2)
 end
 
-#main_graph(10, 200, "gibbs")
+#main_graph(10, 500, "gibbs")
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

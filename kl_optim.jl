@@ -38,11 +38,13 @@ function kl_Wishart(ν_q, S_q, ν_0, S_0)
     return term1 + 0.5 * (term2 + term3) 
 end
 
+# KL from posterior to prior
 function kl_gamma(a_0, b_0, a_s, b_s)
-	kl = a_s*log(b_s) - a_0*log(b_0) - loggamma(a_s) + loggamma(a_0)
-	kl += (a_s - a_0)*(digamma(a_s) - log(b_s))
-	kl -= a_s*(1 - b_0/b_s)
-	return kl
+	term1 = a_s*log(b_s) - a_0*log(b_0) - loggamma(a_s) + loggamma(a_0)
+	term2 = (a_s - a_0)*(digamma(a_s) - log(b_s))
+	term3 = a_s*(1.0 - b_0/b_s)
+    kl_rev_gamma = term1+term2-term3
+	return kl_rev_gamma
 end
 
 function kl_C(μ_0, γ, μ_C, Σ_C, exp_ρs)
