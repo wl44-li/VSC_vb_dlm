@@ -29,7 +29,6 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
 		x[:, t+1] = A * x[:, t] + rand(MvNormal(zeros(K), Q))
 		y[:, t] = C * x[:, t+1] + rand(MvNormal(zeros(D), R)) 
 	end
-
 	return y, x
 end
 
@@ -66,9 +65,9 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 		f_t = C * a_t
 		Q_t = C * R_t * C' + R #V
 
-		# filter 
+		# Kalman Filter 
 		ms[:, t+1] = a_t + R_t * C' * inv(Q_t) * (Ys[:, t] - f_t)
-		Cs[:, :, t+1]= R_t - R_t * C' * inv(Q_t) * C * R_t
+		Cs[:, :, t+1] = R_t - R_t * C' * inv(Q_t) * C * R_t
 	end
 	return ms, Cs, a_s, Rs
 end
@@ -80,29 +79,18 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	ms, Cs, a_s, Rs = forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	X = zeros(K, T+1)
 
-	try
-		X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end])))
-	catch PosDefException
-		println("Pathology case encountered at t=$T: ")
-		println("C_end: ")
-		println(Cs[:, :, end])
-		# println("Y_end:")
-		# println(Ys[:, end])
-	end
+	# temp hack
+	lambda = 5e-6
+	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end] + lambda * I)))
 
 	# Backward Sampling (h_t, H_t)
 	for t in T:-1:1
-		h_t = ms[:, t] + Cs[:, :, t] * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
-		H_t = Cs[:, :, t] - Cs[:, :, t] * A' * inv(Rs[:, :, t]) * A * Cs[:, :, t]
-
-		try
-			X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
-		catch PosDefException
-			println("Pathology case encountered at t=$t: ")
-			println("H_t: ")
-			println(H_t)
-		end
+		C_t = Cs[:, :, t]
+		h_t = ms[:, t] + C_t * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
+		H_t = C_t - C_t * A' * inv(Rs[:, :, t]) * A * C_t
+		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t + lambda * I)))
 	end
+
 	return X
 end
 
@@ -150,11 +138,11 @@ function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=fals
 	P, T = size(y)
 	K = size(A, 2)
 	
-	m_0, C_0 = zeros(K), Matrix{Float64}(I .* 1e7, K, K)
+	m_0, C_0 = zeros(K), Matrix{Float64}(I * 1e7, K, K)
 	
 	v_0 = P + 1.0 
-	S_0 = Matrix{Float64}(0.001 * I, P, P)
-	α, β = 2, 0.001
+	S_0 = Matrix{Float64}(1e-3 * I, P, P)
+	α, β = 2, 1e-3
 
 	"""
 	Initilise both R, Q to I (DLM with R setting)
@@ -169,7 +157,7 @@ function gibbs_dlm_cov(y, A, C, mcmc=10000, burn_in=5000, thinning=1, debug=fals
 	
 	for i in 1:mcmc+burn_in
 		x = ffbs_x(y, A, C, R, Q, m_0, C_0)
-		Q = sample_Q(x, A, α, β) # still diagonal gamma 
+		Q = sample_Q(x, A, α, β)
 		R = sample_R_(y, x, C, v_0, S_0)
 		x = x[:, 2:end]
 
@@ -240,11 +228,11 @@ function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float6
     _, T = size(y)
     K = size(A, 2) 
 
-	# Wishart posterior
+	# Wishart posterior of R
     ν_Rn = prior.ν_R + T
 	W_Rn_inv = inv(prior.W_R) + y*y' - hss.S_C * C' - C * hss.S_C' + C * hss.W_C * C'
     
-	# Gamma posterior
+	# Gamma posterior of Q
     H = hss.W_C - hss.S_A * A' - A * hss.S_A' + A * hss.W_A * A'
 	a_ = prior.a + 0.5 * T
 	a_s = a_ * ones(K) # shape
@@ -252,8 +240,11 @@ function vb_m_step(y::Array{Float64, 2}, hss::HSS, prior::Prior, A::Array{Float6
 	q_𝛐 = Gamma.(a_s, 1 ./ b_s)	
 	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 
-	# Return expectations for E-step, Eq[R], E_q[Q], co-variance matrices
-	return W_Rn_inv ./ ν_Rn, Exp_Q⁻¹, Q_Wishart(ν_Rn, inv(W_Rn_inv), a_, b_s)
+	# q_ = InverseGamma.(a_s, b_s)	
+	# E_Q = diagm(mean.(q_))
+
+	# return E_R, E_Q
+	return W_Rn_inv ./ ν_Rn, inv(Exp_Q⁻¹), Q_Wishart(ν_Rn, inv(W_Rn_inv), a_, b_s)
 end
 
 function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R::Array{Float64, 2}, E_Q::Array{Float64, 2}, m_0, C_0)
@@ -293,11 +284,10 @@ function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Fl
     μ_s[:, end], Σ_s[:, :, end] = μ_f[:, end], Σ_f[:, :, end]
     
     for t in T:-1:1  # Backward pass, Kalman Smoother (s_t, S_t)
-		μ_s[:, t] = μ_f[:, t] + Σ_f[:, :, t] * A' * inv(R_s[:, :, t]) * (μ_s[:, t+1] - A_s[:, t])
-		Σ_s[:, :, t] = Σ_f[:, :, t] - Σ_f[:, :, t] * A' * inv(R_s[:, :, t]) * (R_s[:, :, t] - Σ_s[:, :, t+1]) * inv(R_s[:, :, t]) * A * Σ_f[:, :, t]
-
-		Σ_t_ = inv(inv(Σ_f[:, :, t]) + A'*A)
-		Σ_s_cross[:, :, t] = Σ_t_ * A' * Σ_s[:, :, t]
+		J_t = Σ_f[:, :, t] * A' * inv(R_s[:, :, t])
+		μ_s[:, t] = μ_f[:, t] + J_t * (μ_s[:, t+1] - A_s[:, t])
+		Σ_s[:, :, t] = Σ_f[:, :, t] - J_t * (R_s[:, :, t] - Σ_s[:, :, t+1]) * inv(R_s[:, :, t]) * A * Σ_f[:, :, t]
+		Σ_s_cross[:, :, t] = J_t * Σ_s[:, :, t+1]
     end
 	
     return μ_s, Σ_s, Σ_s_cross
@@ -318,26 +308,41 @@ function vb_e_step(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64,
     return HSS(W_C, W_A, S_C, S_A), log_Z
 end
 
-function vbem_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=300)
-	
-	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
-	E_R, E_Q  = missing, missing
-	
-	for _ in 1:max_iter
-		E_R, E_Q, _ = vb_m_step(y, hss, prior, A, C)
-				
-		hss, _ = vb_e_step(y, A, C, E_R, E_Q, prior)
-	end
-
-	return E_R, E_Q
-end
-
-function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=5e-3)
-	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
+function vbem_c(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::Prior, max_iter=1000, tol=1e-4; init="gibbs_full", debug=false)
 	K = size(A, 2)
-	E_R, E_Q  = missing, missing
+	E_R, E_Q = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
+	hss = missing
+
+	if init == "fixed"
+		hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
+	end
+
+	if init == "gibbs"
+		println("--- Using Gibbs 1-step initilaization ---")
+		prior_d = HPP_D(2, 1e-3, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
+		_, S_Q, S_R = gibbs_diag(y, A, C, prior_d, 1, 0, 1)
+		Q_init, R_init = S_Q[1, :, :], S_R[1, :, :]
+		hss, _ = vb_e_step(y, A, C, R_init, Q_init, prior)
+		if debug
+			println("Q_init: ", Q_init)
+			println("R_init: ", R_init)
+			println("W_C, W_A, S_C, S_A :", hss)
+		end
+	end
+
+	if init == "gibbs_full"
+		println("--- Using Gibbs (Full R) 1-step initilaization ---")
+		_, S_Q, S_R = gibbs_dlm_cov(y, A, C, 1, 0, 1)
+		Q_init, R_init = S_Q[1, :, :], S_R[1, :, :]
+		hss, _ = vb_e_step(y, A, C, R_init, Q_init, prior)
+		if debug
+			println("Q_init: ", Q_init)
+			println("R_init: ", R_init)
+			println("W_C, W_A, S_C, S_A :", hss)
+		end
+	end
 
 	for i in 1:max_iter
 		E_R, E_Q, Q_Wi = vb_m_step(y, hss, prior, A, C)
@@ -400,14 +405,30 @@ function vb_e_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, E_R, E_Q, prio
 end
 
 # VBEM with Convergence
-function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior, hp_learn=false, max_iter=500, tol=1e-3)
+function vbem_c_diag(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-4; init = "gibbs", debug = false)
 	D, _ = size(y)
 	K = size(A, 1)
-	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
 	E_R_inv, E_Q_inv = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
+	hss = missing
 	
+	if init == "fixed"
+		hss = HSS(ones(size(A)), ones(size(A)), ones(size(C)), ones(size(A)))
+	end
+
+	if init == "gibbs"
+		println("--- Using Gibbs 1-step initilaization ---")
+		_, S_Q, S_R = gibbs_diag(y, A, C, prior, 1, 0, 1)
+		Q_init, R_init = S_Q[1, :, :], S_R[1, :, :]
+		hss, _ = vb_e_diag(y, A, C, R_init, Q_init, prior)
+		if debug
+			println("Q_init: ", Q_init)
+			println("R_init: ", R_init)
+			println("W_C, W_A, S_C, S_A :", hss)
+		end
+	end
+
 	for i in 1:max_iter
 		E_R_inv, E_Q_inv, Q_gam = vb_m_diag(y, hss, prior, A, C)
 		hss, μ_s0, Σ_s0, log_Z = vb_e_diag(y, A, C, inv(E_R_inv), inv(E_Q_inv), prior)
@@ -544,7 +565,7 @@ function test_gibbs_diag(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 	D, _ = size(y)
 
 	# DEBUG, different choices of prior params of Gamma
-	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I * 1e7, K, K))
+	prior = HPP_D(2, 1e-3, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	n_samples = Int.(mcmc/thin)
 
 	println("--- MCMC Diagonal Covariances ---")
@@ -570,21 +591,23 @@ function test_gibbs_diag(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 	end
 end
 
-function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
+"""
+DEBUG WITH VBEM
+"""
+function test_vb(y, x_true=nothing, hyperoptim=false; show_plot=false)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
 	K = size(A, 1)
-	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I, K, K))
+	prior = HPP_D(2, 1e-3, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	println("--- VB with Diagonal Covariances ---")
-
-	println("\nHyperparam optimisation: $hyperoptim")
+	println("Hyperparam optimisation: $hyperoptim")
 	@time R, Q, elbos = vbem_c_diag(y, A, C, prior, hyperoptim)
 
 	if show_plot
 		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
 		display(p)
-		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
 	println("VB q(R): ")
@@ -598,9 +621,10 @@ function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
 		println("\n\nMSE, MAD of VB X: ", error_metrics(x_true[:, 2:end], μs_s[:, 2:end]))
 	end
 
+	# VBEM with full R co-variance
 	D, _ = size(y)
-	W_R = Matrix{Float64}(I * 0.01, D, D)
-	prior = Prior(D + 1.0, W_R, 2, 0.001, zeros(K), Matrix{Float64}(I, K, K))
+	W_R = Matrix{Float64}(I * 1e3, D, D)
+	prior = Prior(D + 1.0, W_R, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	println("\n--- VB with Full Co-variances R ---")
 	@time R, Q, elbos = vbem_c(y, A, C, prior)
 	println("VB q(R): ")
@@ -611,8 +635,8 @@ function test_vb(y, x_true=nothing, hyperoptim=false, show_plot=false)
 	if show_plot
 		p = plot(elbos, label = "elbo", title = "ElBO progression, full R")
 		display(p)
-		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
+		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		#savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
 	μs_f, σs_f2, A_s, R_s = forward_(y, A, C, R, Q, prior.m_0, prior.C_0)
@@ -625,8 +649,8 @@ end
 function test_data(rnd, max_T = 500)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
-	Q = Diagonal([1.0, 1.0]) # Diagonal Q
-	R = [0.5 0.2; 0.2 0.5] # Full-cov R
+	Q = Diagonal([10.0, 10.0]) # Diagonal Q
+	R = [10.0 1.0; 1.0 10.0] # Full-cov R
 	m_0 = [0.0, 0.0]
 	C_0 = Diagonal([1.0, 1.0])
 	Random.seed!(rnd)
@@ -634,27 +658,15 @@ function test_data(rnd, max_T = 500)
 	return y, x_true
 end
 
-function test_gibbs()
-	seeds = [111, 199, 188, 234, 236]
-	#seeds = [108, 134, 123, 105, 233]
-	for sd in seeds
-		y, x_true = test_data(sd)
-		println("\n----- BEGIN Run seed: $sd -----\n")
-		test_gibbs_diag(y, x_true, 20000, 10000, 1)
-		println()
-		#test_gibbs_cov(y, x_true, 20000, 10000, 1)
-		println("----- END Run seed: $sd -----\n")
-	end
-end
-
 function com_vb_gibbs()
-	#seeds = [108, 134, 123, 105, 233]
-	seeds = [111, 199, 188, 234, 236]
+	#seeds = [108, 123, 134, 188, 105, 233, 234, 236]
+	seeds = [111]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
-		test_gibbs_cov(y, x_true, 20000, 5000, 1)
-		test_vb(y, x_true) # DEBUG !
+		test_gibbs_diag(y, x_true, 20000, 10000, 1)
+		test_gibbs_cov(y, x_true, 20000, 10000, 1)
+		#test_vb(y, x_true, show_plot=true)
 	end
 end
 
@@ -664,13 +676,12 @@ function out_txt()
 		redirect_stdout(f) do
 			redirect_stderr(f) do
 				com_vb_gibbs()
-				#test_gibbs()
 			end	
 		end
 	end
 end
 
-out_txt()
+#out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

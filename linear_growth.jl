@@ -103,7 +103,7 @@ function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Fl
     Σ_s[:, :, end] = Σ_f[:, :, end]
     
     for t in T:-1:1 # Backward pass (Kalman Smoother)
-		J_t =  Σ_f[:, :, t] * A' * inv(Rs[:, :, t])
+		J_t = Σ_f[:, :, t] * A' * inv(Rs[:, :, t])
 		μ_s[:, t] = μ_f[:, t] + J_t * (μ_s[:, t+1] - A_s[:, t])
 		Σ_s[:, :, t] =  Σ_f[:, :, t] - J_t * (Rs[:, :, t] - Σ_s[:, :, t+1]) * inv(Rs[:, :, t]) * A * Σ_f[:, :, t]
 		Σ_s_cross[:, :, t] = J_t * Σ_s[:, :, t+1]
@@ -146,7 +146,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 
 	hss = missing
 	if init == "mle"
-		println("--- Using MLE initilaize ---")
+		println("--- Using MLE initilaization ---")
 		model = StateSpaceModels.LocalLinearTrend(vec(y))
 		StateSpaceModels.fit!(model)	
 		results = model.results
@@ -176,12 +176,12 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 		if debug
 			println("Q_init: ", Q_init)
 			println("R_init: ", R_init)
-			println("w_c, w_a, s_c, s_a :", hss)
+			println("W_C, W_A, S_C, S_A :", hss)
 		end
 	end
 
 	if init == "gibbs"
-		println("--- Using Gibbs 1-step initilaize ---")
+		println("--- Using Gibbs 1-step initilaization ---")
 		_, S_Q, S_R = gibbs_lg(y, A, C, prior, 1, 0, 1)
 		Q_init, R_init = S_Q[1, :, :], S_R[1, :, :]
 		hss, _, _, _ = vb_e_step(y, A, C, R_init, Q_init, prior)
@@ -189,7 +189,7 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 		if debug
 			println("Q_init: ", Q_init)
 			println("R_init: ", R_init)
-			println("w_c, w_a, s_c, s_a :", hss)
+			println("W_C, W_A, S_C, S_A :", hss)
 		end
 	end
 

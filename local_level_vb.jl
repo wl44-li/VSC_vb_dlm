@@ -428,7 +428,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	hss, qθ = missing, missing
 
 	if init == "mle"
-		println("--- Using MLE initilaize ---")
+		println("--- Using MLE initilaization ---")
 		model = StateSpaceModels.LocalLevel(y)
 		StateSpaceModels.fit!(model)	
 		results = model.results
@@ -460,7 +460,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	end
 
 	if init == "gibbs"
-		println("--- Using Gibbs 1-step initilaize ---")
+		println("--- Using Gibbs 1-step initilaization ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
 		r_init, q_init = sr[1], sq[1]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
