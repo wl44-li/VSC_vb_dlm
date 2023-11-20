@@ -222,17 +222,18 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show
 		p_r = plot(s_r, title="trace r")
 		display(p_r)
 
-		p_r = density(R_chain)
-		title!(p_r, "MCMC R")
-		display(p_r)
+		p_r_d = density(R_chain)
+		title!(p_r_d, "MCMC R")
+		display(p_r_d)
 
-		p_q = density(Q_chain)
-		title!(p_q, "MCMC Q")
-		display(p_q)
+		p_q_d = density(Q_chain)
+		title!(p_q_d, "MCMC Q")
+		display(p_q_d)
+		return x_m, x_std, s_r, s_q
 	end
 
 	# empirical truth to compare with VI
-	return x_m, x_std, s_r, s_q
+	return x_m, x_std, s_r, s_q, R_chain, Q_chain
 end
 
 """
@@ -545,7 +546,7 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
 	τ_ = plot!(mcmc_q, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
 	
 	plot!(τ_, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
-	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing)
+	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
 
 	if true_param !== nothing
 		vline!(τ_, [true_param], label = "ground_truth", linestyle=:dash, linewidth=2)
@@ -613,22 +614,8 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
-	return μs_s, x_std, q_rq
+	return μs_s, x_std, q_rq, els
 end
-
-# max_T = 200
-# R = 10.0
-# Q = 10.0
-# println("Ground-truth r = $R, q = $Q")
-# Random.seed!(123)
-# y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-# hpp_ll = Priors_ll(0.5, 0.5, 0.5, 0.5, 0.0, 1.0)
-# r, q, els, q_rq = vb_ll_c(y, hpp_ll, init="fixed", debug=true)
-# println("\nVB q(r) mode: ", r)
-# println("VB q(q) mode: ", q)
-# p = plot(els, label = "elbo")
-# display(p)
-
 
 function test_MLE(y, x_true = nothing)
 	model = StateSpaceModels.LocalLevel(y)
@@ -678,10 +665,35 @@ function test_nile()
 	y = vec(y)
 	y = Float64.(y)
 
-	# Gibbs agrees with DLM with R
 	test_MLE(y)
-	test_gibbs_ll(y, nothing, 10000, 1000, 5, show_plot = true)
-	test_vb_ll(y, show_plot = true)
+	p_elbo = plot()
+	p_obs_r = plot()
+	p_sys_q = plot()
+
+	for _ in 1:10
+		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 25000, 5000, 5)
+		_, _, q_rq, els = test_vb_ll(y)
+
+		density!(p_obs_r, r_chain)
+		density!(p_sys_q, q_chain)
+
+		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
+		x = range(0, 2000, length=200) 
+		pdf_values = pdf.(gamma_dist_q, x)
+		plot!(p_sys_q, x, pdf_values, label="", lw=1, linestyle=:dash, xlabel="Sys q", ylabel="Density", title="q")
+		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
+		x = range(10000, 30000, length=500) 
+		pdf_values = pdf.(gamma_dist_r, x)
+		plot!(p_obs_r, x, pdf_values, label="", lw=1, linestyle=:dash, xlabel="Obs r", ylabel="Density", title="r")
+
+		plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")
+	end
+
+	display(p_elbo)
+	xlims!(p_sys_q, 0, 2000)
+	display(p_sys_q)
+	xlims!(p_sys_q, 10000, 30000)
+	display(p_obs_r)
 end
 
 test_nile()
@@ -706,16 +718,16 @@ end
 function main(max_T)
 	println("Running experiments for local level model:\n")
 	println("T = $max_T")
-	R = 0.5
-	Q = 1.0
+	R = 50.0
+	Q = 100.0
 	println("Ground-truth r = $R, q = $Q")
 
-	seeds = [88, 145, 105, 104, 134]
-	#seeds = [103, 133, 100, 143, 111]
+	#seeds = [88, 145, 105, 104, 134]
+	seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
-		y, x_true = gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
+		y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 		test_gibbs_ll(y, x_true, 10000, 5000, 1)
 		test_vb_ll(y, x_true)
 	end
@@ -730,7 +742,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
-	vb_x_m, vb_x_std, q_rq = test_vb_ll(y, x_true, true, show_plot = true)
+	vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true, show_plot = true)
 
 	"""
 	Choice of Gibbs, NUTS, HMC
@@ -738,7 +750,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 3000, 1000, 1, show_plot=true)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1, show_plot=true)
 	end
 
 	if sampler == "hmc" #turing
@@ -777,6 +789,8 @@ function out_txt(n)
 		end
 	end
 end
+
+#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

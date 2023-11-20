@@ -13,7 +13,6 @@ begin
 	using StatsBase
 	using Dates
 	using DataFrames
-	using StateSpaceModels
 end
 
 export gen_data
@@ -60,10 +59,6 @@ function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float
 	H = Diagonal([H_11, H_22])
 	β_s = [hpp.β + 0.5 * H[i, i] for i in 1:K]
 	q_𝛐 = Gamma.(α_s, 1 ./ β_s)
-
-	"""
-	Q inference needs potential check
-	"""
 	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 	return Exp_R⁻¹, Exp_Q⁻¹, Q_Gamma(a_, b_s, α_, β_s)
 end
@@ -108,10 +103,10 @@ function backward_(A::Array{Float64, 2}, μ_f::Array{Float64, 2}, Σ_f::Array{Fl
     Σ_s[:, :, end] = Σ_f[:, :, end]
     
     for t in T:-1:1 # Backward pass (Kalman Smoother)
-		μ_s[:, t] = μ_f[:, t] + Σ_f[:, :, t] * A' * inv(Rs[:, :, t]) * (μ_s[:, t+1] - A_s[:, t])
-		Σ_s[:, :, t] =  Σ_f[:, :, t] - Σ_f[:, :, t] * A' * inv(Rs[:, :, t]) * (Rs[:, :, t] - Σ_s[:, :, t+1]) * inv(Rs[:, :, t]) * A * Σ_f[:, :, t]
-		Σ_t_ = inv(inv(Σ_f[:, :, t]) + A'*A)
-		Σ_s_cross[:, :, t] = Σ_t_ * A' * Σ_s[:, :, t]
+		J_t =  Σ_f[:, :, t] * A' * inv(Rs[:, :, t])
+		μ_s[:, t] = μ_f[:, t] + J_t * (μ_s[:, t+1] - A_s[:, t])
+		Σ_s[:, :, t] =  Σ_f[:, :, t] - J_t * (Rs[:, :, t] - Σ_s[:, :, t+1]) * inv(Rs[:, :, t]) * A * Σ_f[:, :, t]
+		Σ_s_cross[:, :, t] = J_t * Σ_s[:, :, t+1]
     end
 	
     return μ_s, Σ_s, Σ_s_cross
@@ -144,10 +139,65 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 	return inv(E_R_inv), inv(E_Q_inv)
 end
 
-function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-4)
+using StateSpaceModels
+function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-4; init="gibbs", debug=false)
 	D, _ = size(y)
 	K = size(A, 1)
-	hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
+
+	hss = missing
+	if init == "mle"
+		println("--- Using MLE initilaize ---")
+		model = StateSpaceModels.LocalLinearTrend(vec(y))
+		StateSpaceModels.fit!(model)	
+		results = model.results
+		mle_ms = results.coef_table.coef
+		mle_sterrs = results.coef_table.std_err
+		println(mle_ms, mle_sterrs)
+
+		mle_estimate_R = mle_ms[1]
+		mle_estimate_Q_1 = mle_ms[2] 
+		mle_estimate_Q_2 = mle_ms[3]
+		se_R = mle_sterrs[1]
+		se_Q_1 = mle_sterrs[2] 
+		se_Q_2 = mle_sterrs[3]
+
+		alpha_R = (mle_estimate_R / se_R)^2
+		theta_R = se_R^2 / mle_estimate_R
+		R_init = diagm([rand(Gamma(alpha_R, theta_R))])
+
+		alpha_Q_1 = (mle_estimate_Q_1 / se_Q_1)^2
+		theta_Q_1 = se_Q_1^2 / mle_estimate_Q_1
+		alpha_Q_2 = (mle_estimate_Q_2 / se_Q_2)^2
+		theta_Q_2 = se_Q_2^2 / mle_estimate_Q_2
+
+		Q_init = diagm([rand(Gamma(alpha_Q_1, theta_Q_1)), rand(Gamma(alpha_Q_2, theta_Q_2))])
+		hss, _, _, _ = vb_e_step(y, A, C, R_init, Q_init, prior)
+
+		if debug
+			println("Q_init: ", Q_init)
+			println("R_init: ", R_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
+	end
+
+	if init == "gibbs"
+		println("--- Using Gibbs 1-step initilaize ---")
+		_, S_Q, S_R = gibbs_lg(y, A, C, prior, 1, 0, 1)
+		Q_init, R_init = S_Q[1, :, :], S_R[1, :, :]
+		hss, _, _, _ = vb_e_step(y, A, C, R_init, Q_init, prior)
+		
+		if debug
+			println("Q_init: ", Q_init)
+			println("R_init: ", R_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
+	end
+
+	if init == "fixed"
+		hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
+	end
+
+
 	E_R_inv, E_Q_inv = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
@@ -162,6 +212,17 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 		elbo = log_Z - kl_ρ - kl_𝛐
 		el_s[i] = elbo
 		
+		if debug
+			println("\nVB iter $i: ")
+			println("\tQ: ", inv(E_Q_inv))
+			println("\tR: ", inv(E_R_inv))
+			println("\tα_r, β_r, α_q, β_q: ", Q_gam)
+			println("\tLog Z: ", log_Z)
+			println("\tKL r: ", kl_ρ)
+			println("\tKL r: ", kl_𝛐)
+			println("\tElbo $i: ", elbo)
+		end
+
 		if abs(elbo - elbo_prev) < tol
 			println("Stopped at iteration: $i")
 			el_s = el_s[1:i]
@@ -185,16 +246,16 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 	return inv(E_R_inv), inv(E_Q_inv), el_s, Q_gam
 end
 
-function test_vb(y, x_true, hyperoptim=false; show_plot=false)
+function test_vb(y, x_true=nothing, hyperoptim=false; show_plot=false, init="gibbs")
 	T = size(y, 2)
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.01, 2, 0.01, zeros(K), Matrix{Float64}(I * 1e6, K, K))
+	prior = HPP_D(2, 1e-3, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	println("--- VBEM ---")
 
 	println("\nHyper-param optimisation: $hyperoptim")
-	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim, 200)
+	@time R, Q, elbos, Q_gam = vbem_lg_c(y, A_lg, C_lg, prior, hyperoptim, debug=false, init=init)
 
 	μs_f, σs_f2, A_s, Rs, _ = forward_(y, A_lg, C_lg, R, Q, prior)
 	μs_s, Σ_s, _ = backward_(A_lg, μs_f, σs_f2, A_s, Rs)
@@ -203,25 +264,27 @@ function test_vb(y, x_true, hyperoptim=false; show_plot=false)
 	show(stdout, "text/plain", R)
 	println("\n\nVB q(Q):")
 	show(stdout, "text/plain", Q)
-	println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+
+	if x_true !== nothing
+		println("\n\nMSE, MAD of VB latent X: ", error_metrics(x_true, μs_s))
+	end
 
 	vars = hcat([diag(Σ_s[:, :, t]) for t in 1:T+1]...)
 	stds = sqrt.(vars)
 
 	if show_plot
 		p = plot(elbos, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
-		plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 		display(p)
-		sleep(1)
+		# plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
+		# savefig(p, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 
-		plots = plot_x_itvl(μs_s, stds, x_true, 20)
-		for i in 1:K
-			pl = plots[i]
-			title!(pl, "VB, hyper-param optim:$t")
-			display(pl)
-			sleep(1)
-		end
+		# plots = plot_x_itvl(μs_s, stds, x_true, 20)
+		# for i in 1:K
+		# 	pl = plots[i]
+		# 	title!(pl, "VB, hyper-param optim:$t")
+		# 	display(pl)
+		# 	sleep(1)
+		# end
 	end
 	return μs_s, stds, Q_gam
 end
@@ -278,7 +341,7 @@ function test_Gibbs_RQ(rnd, T = 100)
 	Q_lg = Diagonal([100.0, 5.0])
 	R_lg = [30.0]
 	μ_0 = [0.0, 0.0]
-	Σ_0 = Diagonal([1000.0, 1000.0])
+	Σ_0 = Diagonal([1.0, 1.0])
 	println("R True:")
 	show(stdout, "text/plain", R_lg)
 	println()
@@ -350,31 +413,12 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 
 	lambda = 5e-6
 	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(Cs[:, :, end] + lambda * I)))
-	# try
-	# 	X[:, end] = rand(MvNormal(ms[:, end], Cs[:, :, end]))
-	# catch PosDefException
-	# 	println("PosDefException at t=$T")
-	# 	U, Σ, V = svd(Cs[:, :, end])
-	# 	H_T = U * diagm(Σ) * V'
- 	# 	X[:, end] = rand(MvNormal(ms[:, end], Symmetric(H_T)))
-	# end
 
 	for t in T:-1:1 # backward sampling
 		C_t = Cs[:, :, t]
 		h_t = ms[:, t] + C_t * A' * inv(Rs[:, :, t])*(X[:, t+1] - a_s[:, t])
 		H_t = C_t - C_t * A' * inv(Rs[:, :, t]) * A * C_t
 		X[:, t] = rand(MvNormal(h_t, Symmetric(H_t + lambda * I)))
-		# try
-		# 	U, Σ, V = svd(H_t)
-		# 	H_t = U * diagm(Σ) * V'
-		# 	X[:, t] = rand(MvNormal(h_t, Symmetric(H_t)))
-		# catch PosDefException
-		# 	println("PosDefException at t=$t")
-		# 	# println("\tH_t ", H_t)
-		# 	# U, Σ, V = svd(H_t)
-		# 	# H_t = U * diagm(Σ) * V'
-		# 	# println("\tH_t (svd)", H_t)
-		# end
 	end
 
 	return X
@@ -426,7 +470,7 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_pl
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
 	K = size(A_lg, 1)
-	prior = HPP_D(2, 0.001, 2, 0.001, zeros(K), Matrix{Float64}(I * 1e6, K, K))
+	prior = HPP_D(2, 1e-3, 2, 1e-3, zeros(K), Matrix{Float64}(I * 1e7, K, K))
 	n_samples = Int.(mcmc/thin)
 
 	println("--- MCMC ---")
@@ -486,18 +530,18 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_pl
 end
 
 """
-On-going Gibbs debug, PosDefException for back sample at t=2, need to use SVD !
+Gibbs Debugged, PosDefException for back sample at t=2, simple hack or SVD/Information Filter
 """
 A_lg = [1.0 1.0; 0.0 1.0]
 C_lg = [1.0 0.0]
-Q = Diagonal([10.0, 1.0])
-R = [10.0]
+Q = Diagonal([20.0, 5.0])
+R = [15.0]
 K = size(A_lg, 1)
-Random.seed!(10)
-y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K) .* 1e7), 1000)
-#test_mle(y, x_true)
-test_gibbs(y, x_true, 20000, 5000, 1)
-#test_vb(y, x_true)
+Random.seed!(123)
+y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
+test_mle(y, x_true)
+test_gibbs(y, x_true, 10000, 5000, 1)
+test_vb(y, x_true, show_plot=true)
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
