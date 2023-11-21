@@ -267,8 +267,8 @@ function forward_(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 
 		Q_t = C * R_t * C' + E_R
 		log_Z += logpdf(MvNormal(f_t, Symmetric(Q_t)), y[:, t])
 
-		μ_f[:, t] = A_t + R_t * C' * inv(Q_t) * (y[:, t] - f_t)
-		Σ_f[:, :, t] = R_t - R_t * C' * inv(Q_t) * C * R_t
+		μ_f[:, t+1] = A_t + R_t * C' * inv(Q_t) * (y[:, t] - f_t)
+		Σ_f[:, :, t+1] = R_t - R_t * C' * inv(Q_t) * C * R_t
     end
 	
     return μ_f, Σ_f, A_s, R_s, log_Z
@@ -591,9 +591,6 @@ function test_gibbs_diag(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1)
 	end
 end
 
-"""
-DEBUG WITH VBEM
-"""
 function test_vb(y, x_true=nothing, hyperoptim=false; show_plot=false)
 	A = [1.0 0.0; 0.0 1.0]
 	C = [1.0 0.0; 0.0 1.0]
@@ -659,14 +656,15 @@ function test_data(rnd, max_T = 500)
 end
 
 function com_vb_gibbs()
-	#seeds = [108, 123, 134, 188, 105, 233, 234, 236]
-	seeds = [111]
+	#seeds = [199, 188, 233, 234, 236]
+	seeds = [111, 108, 134, 123, 105]
 	for sd in seeds
 		y, x_true = test_data(sd)
 		println("--- Seed: $sd ---")
 		test_gibbs_diag(y, x_true, 20000, 10000, 1)
 		test_gibbs_cov(y, x_true, 20000, 10000, 1)
-		#test_vb(y, x_true, show_plot=true)
+		test_vb(y, x_true, show_plot=true)
+		println()
 	end
 end
 
@@ -681,7 +679,7 @@ function out_txt()
 	end
 end
 
-#out_txt()
+out_txt()
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

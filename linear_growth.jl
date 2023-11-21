@@ -495,34 +495,34 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_pl
 	end
 
 	if show_plot
-		R_chain = Chains(reshape(1 ./ Rs_samples, n_samples, 1))
-		p_r = density(R_chain[:, 1, :], label="MCMC Λ_R")
-		title!(p_r, "MCMC Λ_R")
-		display(p_r)
+		#R_chain = Chains(reshape(Rs_samples, n_samples, 1))
+		p_r = density(R_chain[:, 1, :], label="MCMC R")
+		#title!(p_r, "MCMC R")
+		#display(p_r)
 
-		p_r_his = histogram(R_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Λ_R")
-		display(p_r_his)
+		p_r_his = histogram(R_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC R")
+		#display(p_r_his)
 
-		Q_chain = Chains(reshape(1 ./ Qs_samples, n_samples, 4))
-		p1 = density(Q_chain[:, 1, :], label="MCMC Λ_Q[1, 1]")
-		display(p1)
+		#Q_chain = Chains(reshape(1 ./ Qs_samples, n_samples, 4))
+		p1 = density(Q_chain[:, 1, :], label="MCMC Q[1, 1]")
+		#display(p1)
 
-		p1_his = histogram(Q_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Λ_Q[1, 1]")
-		display(p1_his)
+		p1_his = histogram(Q_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Q[1, 1]")
+		#display(p1_his)
 
-		p4 = density(Q_chain[:, end, :], label="MCMC Λ_Q[2, 2]")
-		display(p4)
+		p4 = density(Q_chain[:, end, :], label="MCMC Q[2, 2]")
+		#display(p4)
 
-		p4_his = histogram(Q_chain[:, end, :], bins=200, normalize=:pdf, label="MCMC Λ_Q[2, 2]")
-		display(p4_his)
+		p4_his = histogram(Q_chain[:, end, :], bins=200, normalize=:pdf, label="MCMC Q[2, 2]")
+		#display(p4_his)
 
-		ps = plot_x_itvl(xs_m, xs_std, x_true, 20)
-		for i in 1:K
-			p = ps[i]
-			title!(p, "MCMC latent x inference")
+		#ps = plot_x_itvl(xs_m, xs_std, x_true, 20)
+		#for i in 1:K
+			#p = ps[i]
+			#title!(p, "MCMC latent x inference")
 			#display(p)
-			sleep(1)
-		end
+			#sleep(1)
+		#end
 
 		return xs_m, xs_std, p_r, p1, p4
 	end
@@ -532,16 +532,16 @@ end
 """
 Gibbs Debugged, PosDefException for back sample at t=2, simple hack or SVD/Information Filter
 """
-A_lg = [1.0 1.0; 0.0 1.0]
-C_lg = [1.0 0.0]
-Q = Diagonal([20.0, 5.0])
-R = [15.0]
-K = size(A_lg, 1)
-Random.seed!(123)
-y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
-test_mle(y, x_true)
-test_gibbs(y, x_true, 10000, 5000, 1)
-test_vb(y, x_true, show_plot=true)
+# A_lg = [1.0 1.0; 0.0 1.0]
+# C_lg = [1.0 0.0]
+# Q = Diagonal([20.0, 5.0])
+# R = [15.0]
+# K = size(A_lg, 1)
+# Random.seed!(123)
+# y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
+# test_mle(y, x_true)
+# test_gibbs(y, x_true, 20000, 10000, 1)
+# test_vb(y, x_true, show_plot=true)
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -566,8 +566,8 @@ function main(n)
 	println("T = $n\n")
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q = Diagonal([1.0, 1.0])
-	R = [0.5]
+	Q = Diagonal([20.0, 5.0])
+	R = [15.0]
 	K = size(A_lg, 1)
 	μ_0 = zeros(K)
 	Σ_0 = Diagonal(ones(K))
@@ -583,23 +583,24 @@ function main(n)
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
-		y, x_true = gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
+		y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, n)
 		comp_vb_mle(y, x_true)
+		test_gibbs(y, x_true)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param = nothing, x_lmin = 0.0, x_lmax = 20.0)
+function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param=nothing, x_lmin = 0.0, x_lmax = 20.0)
     x_min, x_max = xlims(p_mcmc)
 	x_min = max(x_lmin, x_min)
 	x_max = min(x_lmax, x_max)
-    gamma_dist_q = Gamma(a_q, 1/b_q) 
+    gamma_dist_q = InverseGamma(a_q, b_q) 
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
     x = range(x_min, x_max, length=100)
     pdf_values = pdf.(gamma_dist_q, x)
-    τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
+    τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=1, xlabel="", ylabel="Density")
 	
 	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
 	vspan!(τ_q, [ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing, xlims=(x_min, x_max))
@@ -621,8 +622,8 @@ function main_graph(n, sd)
 	println("T = $n\n")
 	A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
-	Q = Diagonal([1.0, 1.0])
-	R = [1.0]
+	Q = Diagonal([20.0, 5.0])
+	R = [15.0]
 	K = size(A_lg, 1)
 
 	println("Ground-truth R:")
@@ -632,19 +633,19 @@ function main_graph(n, sd)
 
 	println("\n----- BEGIN Run seed: $sd -----\n")
 	Random.seed!(sd)
-	y, x_true = gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), n)
+	y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), n)
 
 	xm_vb, std_vb, Q_gam = comp_vb_mle(y, x_true)
 
-	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 10000, 5000, 1, true)
+	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 15000, 10000, 1, show_plot=true)
 
-	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r)
+	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 35.0)
 	display(plot_r)
 
-	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1)
+	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1, Q[1, 1], 0.0, 40.0)
 	display(plot_q1)
 
-	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2)
+	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2, Q[2, 2], 0.0, 10.0)
 	display(plot_q2)
 
 	p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, 2:end])
@@ -660,12 +661,12 @@ function main_graph(n, sd)
 	display(p2)
 
 	p_2v = compare_mcmc_vi(std_mcmc[2, :], std_vb[2, 2:end])
-	#p_2v= qqplot((std_mcmc.^2)[2, :], (std_vb.^2)[2, :], qqline = :R)
 	title!(p_2v, "Latent x std, x_2")
 	display(p_2v)
-	
 	println("----- END Run seed: $sd -----\n")
 end
+
+main_graph(1000, 123)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
