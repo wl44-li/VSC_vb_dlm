@@ -205,7 +205,7 @@ function update_ab(hpp::HPP, exp_ρ::Vector{Float64}, exp_log_ρ::Vector{Float64
 	return a, b
 end
 
-function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=300)
+function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	D, T = size(ys)
 	K = length(hpp.γ)
 	
@@ -232,12 +232,12 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=300)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; debug = false)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; debug = false)
 	D, _ = size(ys)
 	K = length(hpp.γ)
 	
 	"""
-	TO-DO: other initialisations
+	TO-DO: random initialisations
 	"""
 	W_C = Matrix{Float64}(D*I, K, K)
 	S_C = Matrix{Float64}(D*I, K, D)
@@ -288,8 +288,6 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=1000
 	return exp_np, elbo_prev, el_s
 end
 
-""" TO-TEST: flat prior with random start
-"""
 function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
 	println("T = $max_T")
@@ -297,7 +295,7 @@ function comp_ppca(max_T = 1000)
 	σ² = 5.0
 	R = Diagonal(ones(3) .* σ²)
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I * 1e5, 2, 2)
+	Σ_0 = Matrix{Float64}(I, 2, 2)
 
 	println("Ground-truth Loading Matrix W:")
 	show(stdout, "text/plain", C_)
@@ -314,18 +312,18 @@ function comp_ppca(max_T = 1000)
 		show(stdout, "text/plain", loadings(M_mle))
 		println("\n\n", M_mle)
 		mle_x_pred = MultivariateStats.predict(M_mle, y)
-		println("latent x error: ", error_metrics(x_true, mle_x_pred))
+		println("latent x MSE, MAD: ", error_metrics(x_true, mle_x_pred))
 		mle_y_recon = MultivariateStats.reconstruct(M_mle, x_true)
-		println("reconstruction y error: ", error_metrics(y, mle_y_recon))
+		println("reconstruction y MSE, MAD: ", error_metrics(y, mle_y_recon))
 
 		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
 		println("\n--- EM ---\n Loading Matrix W:")
 		show(stdout, "text/plain", loadings(M_em))
 		println("\n\n", M_em)
 		em_x_pred = MultivariateStats.predict(M_em, y)
-		println("latent x error: ", error_metrics(x_true, em_x_pred))
+		println("latent x MSE, MAD: ", error_metrics(x_true, em_x_pred))
 		em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
-		println("reconstruction y error: ", error_metrics(y, em_y_recon))
+		println("reconstruction y MSE, MAD: ", error_metrics(y, em_y_recon))
 
 		# M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
 		# println("\n--- Bayes ---\n Loading Matrix W:")
@@ -344,15 +342,17 @@ function comp_ppca(max_T = 1000)
 		println("\nIsotropic Co-variance R: ")
 		show(stdout, "text/plain", inv(exp_np.R⁻¹))
 		ωs, _, _ = v_forward(y, exp_np, hpp)
-		println("\nlatent x error: ", error_metrics(x_true, ωs))
+		println("\nlatent x MSE, MAD: ", error_metrics(x_true, ωs))
 		W = exp_np.C
 		WTW = W'*W
 		C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
 		y_recon = W*inv(WTW + I * 1e-5)*C*x_true
-		println("y recon error: ", error_metrics(y, y_recon))
+		println("y recon MSE, MAD: ", error_metrics(y, y_recon))
 		println("----- END Run seed: $sd -----\n")
 	end
 end
+
+#comp_ppca()
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -371,7 +371,7 @@ TO-DO: Compare ELBO for optimal K,
 convex optimisation? ELBO is generally NON-CONVEX
 VI always reaches the same ELBO with fixed initialisations
 - Consider different random starts
-- MLE
+- MLE result of σ² -> run E-step first
 """
 
 function k_elbo_p3(y, n=1, hyper_optim=true)
@@ -429,7 +429,7 @@ function main(n)
 end
 
 # for MNIST data
-function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=true)
+function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false)
 	# related to row-precision of C
 	γ = ones(2) .* 1e-6
 

@@ -7,10 +7,6 @@ module LocalLevel
 begin
 	using Distributions, Random
 	using LinearAlgebra
-	using SpecialFunctions
-	using MCMCChains
-	using DataFrames
-	using StatsPlots
 end
 
 export gen_data
@@ -30,6 +26,16 @@ function gen_data(A, C, Q, R, m_0, C_0, T)
 	return y, x
 end
 
+end
+
+begin
+	using Distributions, Random
+	using LinearAlgebra
+	using SpecialFunctions
+	using MCMCChains
+	using DataFrames
+	using StatsPlots
+	using StateSpaceModels
 end
 
 begin
@@ -410,8 +416,7 @@ function update_ab(hpp::Priors_ll, qθ)
 	return a_r, b_r, a_q, b_q
 end
 
-using StateSpaceModels
-function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=false)
+function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-4; init="gibbs", debug=false)
 	"""
 	Random initilisation
 
@@ -671,14 +676,14 @@ function test_nile()
 	p_sys_q = plot()
 
 	for _ in 1:10
-		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 25000, 5000, 5)
+		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 25000, 10000, 5)
 		_, _, q_rq, els = test_vb_ll(y)
 
 		density!(p_obs_r, r_chain)
 		density!(p_sys_q, q_chain)
 
 		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
-		x = range(0, 2000, length=200) 
+		x = range(0, 2000, length=500) 
 		pdf_values = pdf.(gamma_dist_q, x)
 		plot!(p_sys_q, x, pdf_values, label="", lw=1, linestyle=:dash, xlabel="Sys q", ylabel="Density", title="q")
 		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)

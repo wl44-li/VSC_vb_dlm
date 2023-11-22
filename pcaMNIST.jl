@@ -106,7 +106,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     display(p)
 end
 
-test_MNIST(100, true, "vbem")
+#test_MNIST(100, true, "vbem")
 #test_MNIST()
 
 """
@@ -128,7 +128,7 @@ y = zscore(y, 1)
 # pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
 # M = projection(pca)
 
-C = vb_ppca_k2(y, 10, false)
+C = vb_ppca_k2(y, 50, false)
 M = svd(C).U
 
 compare_0(train_y, train_labels, M)

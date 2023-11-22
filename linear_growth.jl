@@ -4,15 +4,6 @@ module LinearGrowth
 begin
 	using Distributions, Random
 	using LinearAlgebra
-	using StatsFuns
-	using MCMCChains
-	using Statistics
-	using DataFrames
-	using StatsPlots
-	using SpecialFunctions
-	using StatsBase
-	using Dates
-	using DataFrames
 end
 
 export gen_data
@@ -35,6 +26,21 @@ function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	return y, x
 end
 
+end
+
+begin
+	using Distributions, Random
+	using LinearAlgebra
+	using StatsFuns
+	using MCMCChains
+	using Statistics
+	using DataFrames
+	using StatsPlots
+	using SpecialFunctions
+	using StatsBase
+	using Dates
+	using DataFrames
+	using StateSpaceModels
 end
 
 """
@@ -139,7 +145,6 @@ function vbem_lg(y::Array{Float64, 2}, A::Array{Float64, 2}, C::Array{Float64, 2
 	return inv(E_R_inv), inv(E_Q_inv)
 end
 
-using StateSpaceModels
 function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, hp_learn=false, max_iter=500, tol=1e-4; init="gibbs", debug=false)
 	D, _ = size(y)
 	K = size(A, 1)
@@ -590,7 +595,7 @@ function main(n)
 	end
 end
 
-function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param=nothing, x_lmin = 0.0, x_lmax = 20.0)
+function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param=nothing, x_lmin=0.0, x_lmax=20.0)
     x_min, x_max = xlims(p_mcmc)
 	x_min = max(x_lmin, x_min)
 	x_max = min(x_lmax, x_max)
@@ -598,7 +603,7 @@ function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param=nothing, x_lmin = 0.0, 
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
-    x = range(x_min, x_max, length=100)
+    x = range(x_min, x_max, length=200)
     pdf_values = pdf.(gamma_dist_q, x)
     τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=1, xlabel="", ylabel="Density")
 	
@@ -639,7 +644,7 @@ function main_graph(n, sd)
 
 	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 15000, 10000, 1, show_plot=true)
 
-	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 35.0)
+	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 30.0)
 	display(plot_r)
 
 	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1, Q[1, 1], 0.0, 40.0)
