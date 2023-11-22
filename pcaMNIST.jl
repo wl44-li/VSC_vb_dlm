@@ -128,7 +128,7 @@ y = zscore(y, 1)
 # pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
 # M = projection(pca)
 
-C = vb_ppca_k2(y, 50, false)
+C = vb_ppca_k2(y, 100, false)
 M = svd(C).U
 
 compare_0(train_y, train_labels, M)

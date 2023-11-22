@@ -10,13 +10,12 @@ begin
 end
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
-	Random.seed!(103)
 	K, _ = size(A)
 	D, _ = size(C)
 	x = zeros(K, T)
 	y = zeros(D, T)
 
-	x[:, 1] = rand(MvNormal(A*μ_0, A'*Σ_0*A + Q))
+	x[:, 1] = rand(MvNormal(A*μ_0, Q))
 	y[:, 1] = C * x[:, 1] + rand(MvNormal(zeros(D), R))
 
 	for t in 2:T
@@ -72,47 +71,27 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	μ_C = [Σ_C * S_C[:, s] for s in 1:P]
 	
 	G = ys * ys' - S_C' * Σ_C * S_C
-	a_ = a + 0.5 * T
-	a_s = a_ * ones(P)
-    b_s = [b + 0.5 * G[i, i] for i in 1:P]
-	
-	q_ρ = missing
-	
-	try
-	    q_ρ = Gamma.(a_s, 1 ./ b_s)
-	catch err
-	    if isa(err, DomainError)
-	        println("--- DomainError occurred with Gamma Distribution")
-			# println("\ta_s: ", a_s[1])
-			# println("\tb_s: ", b_s)
-			b_s = abs.(b_s)
-			# println("\tTemporary fix: ", b_s)
-			println("Please consider adjusting hyperparameters γ, a, b and re-run PPCA ---\n")
-
-			q_ρ = Gamma.(a_s, 1 ./ b_s)
-	    else
-	        rethrow(err)
-	    end
-	end
-
-	ρ̄ = mean.(q_ρ)
+	a_s = a + 0.5 * T * P
+    b_s = b + 0.5 * tr(G)
+	q_ρ = Gamma(a_s, 1 / b_s)
+	ρ̄ = mean(q_ρ)
 	
 	# Exp_ϕ 
 	Exp_C = S_C'*Σ_C
-	Exp_R⁻¹ = diagm(ρ̄)
-	Exp_CᵀR⁻¹C = Exp_C'*Exp_R⁻¹*Exp_C + D*Σ_C
+	Exp_R⁻¹ = diagm(ones(P) .* ρ̄)
+	Exp_CᵀR⁻¹C = Exp_C'*Exp_R⁻¹*Exp_C + P*Σ_C
 	Exp_R⁻¹C = Exp_R⁻¹*Exp_C
 	Exp_CᵀR⁻¹ = Exp_C'*Exp_R⁻¹
 
 	# update hyperparameter (after m-step)
-	γ_n = [D/((D*Σ_C + Σ_C*S_C*Exp_R⁻¹*S_C'*Σ_C)[j, j]) for j in 1:K]
+	γ_n = [P/((P*Σ_C + Σ_C*S_C*Exp_R⁻¹*S_C'*Σ_C)[j, j]) for j in 1:K]
 
 	# for updating gamma hyperparam a, b       
-	exp_ρ = a_s ./ b_s
-	exp_log_ρ = [(digamma(a_) - log(b_s[i])) for i in 1:P]
+	exp_ρ = ones(P) .* (a_s / b_s)
+	exp_log_ρ = [(digamma(a_s) - log(b_s)) for _ in 1:P]
 	
 	# return expected natural parameters :: Exp_ϕ (for e-step)
-	return Exp_ϕ(Exp_C, Exp_R⁻¹, Exp_CᵀR⁻¹C, Exp_R⁻¹C, Exp_CᵀR⁻¹, exp_log_ρ), γ_n, exp_ρ, exp_log_ρ, Qθ(Σ_C, μ_C, a_, b_s)
+	return Exp_ϕ(Exp_C, Exp_R⁻¹, Exp_CᵀR⁻¹C, Exp_R⁻¹C, Exp_CᵀR⁻¹, exp_log_ρ), γ_n, exp_ρ, exp_log_ρ, Qθ(Σ_C, μ_C, a_s, b_s)
 end
 
 function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
@@ -123,7 +102,6 @@ function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
     Σs = zeros(K, K, T)
 	Σs_ = zeros(K, K, T)
 
-	# initialise for t = 1, Σ_0 is a multiple of I
 	Σs_[:, :, 1] = hpp.Σ_0
 		
 	# iterate over T, Algorithm 5.1
@@ -139,20 +117,23 @@ function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
 	return μs, Σs, Σs_
 end
 
-function log_Z(ys, μs, Σs, Σs_, exp_np::Exp_ϕ, hpp::HPP)
+"""
+Simplified for PPCA, double check with Algorithm 5.1
+"""
+function log_Z(ys, μs, Σs, exp_np::Exp_ϕ, hpp::HPP)
 	D, T = size(ys)
 	log_Z = 0
 	log_det_R = D*log(2π) - sum(exp_np.log_ρ)
 
 	# t = 1
-	log_Z += -0.5*(log_det_R - logdet(inv(hpp.Σ_0)*Σs_[:, :, 1]*Σs[:, :, 1]) + hpp.μ_0'*inv(hpp.Σ_0)*hpp.μ_0 - μs[:, 1]'*inv(Σs[:, :, 1])*μs[:, 1] + ys[:, 1]'*exp_np.R⁻¹*ys[:, 1] - transpose(inv(hpp.Σ_0)*hpp.μ_0)*Σs_[:, :, 1]*inv(hpp.Σ_0)*hpp.μ_0)
+	log_Z += -0.5*(log_det_R - logdet(Σs[:, :, 1]) + hpp.μ_0'*inv(hpp.Σ_0)*hpp.μ_0 - μs[:, 1]'*inv(Σs[:, :, 1])*μs[:, 1] + ys[:, 1]'*exp_np.R⁻¹*ys[:, 1] - transpose(inv(hpp.Σ_0)*hpp.μ_0)*hpp.μ_0)
 	
 	for t in 2:T
-		log_det_Σ = logdet(inv(Σs[:, :, t-1])*Σs_[:, :, t]*Σs[:, :, t])
+		log_det_Σ = logdet(Σs[:, :, t])
 		μ_t_ = μs[:, t-1]'*inv(Σs[:, :, t-1])*μs[:, t-1]
 		μ_t = μs[:, t]'*inv(Σs[:, :, t])*μs[:, t]
 		y_t = ys[:, t]'*exp_np.R⁻¹*ys[:, t]
-		Σ_μ_t = transpose(inv(Σs[:, :, t-1])*μs[:, t-1])*Σs_[:, :, t]*inv(Σs[:, :, t-1])*μs[:, t-1]
+		Σ_μ_t = transpose(inv(Σs[:, :, t-1])*μs[:, t-1])*μs[:, t-1]
 
 		log_Z += -0.5 * (log_det_R - log_det_Σ + μ_t_ - μ_t + y_t - Σ_μ_t)
 	end
@@ -174,14 +155,14 @@ function vb_e(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
 	end
 
 	# compute log partition ln Z' (ELBO and convergence check)
-	log_Z_ = log_Z(ys, ωs, Υs, Σs_, exp_np, hpp)
+	log_Z_ = log_Z(ys, ωs, Υs, exp_np, hpp)
 	
 	return HSS_PPCA(W_C, S_C), log_Z_
 end
 
 function update_ab(hpp::HPP, exp_ρ::Vector{Float64}, exp_log_ρ::Vector{Float64})
-    d = mean(exp_ρ)
-    c = mean(exp_log_ρ)
+    d = exp_ρ[1]
+    c = exp_log_ρ[1]
     
     # Update `a` using fixed point iteration
 	a = hpp.a		
@@ -232,17 +213,40 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; debug = false)
-	D, _ = size(ys)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="fixed", debug=false)
+	P, _ = size(ys)
 	K = length(hpp.γ)
-	
-	"""
-	TO-DO: random initialisations
-	"""
-	W_C = Matrix{Float64}(D*I, K, K)
-	S_C = Matrix{Float64}(D*I, K, D)
+	hss = missing
 
-	hss = HSS_PPCA(W_C, S_C)
+	if init == "mle"
+		# use MLE esitmate of σ and C to run VBE-step first
+
+
+	end
+
+	if init == "fixed"
+		W_C = Matrix{Float64}(P*I, K, K)
+		S_C = Matrix{Float64}(P*I, K, P)
+		hss = HSS_PPCA(W_C, S_C)
+	end
+
+	if init == "random"
+		# init R and C, needs more testing
+		cs = [rand(MvNormal(zeros(K), I)) for _ in 1:P]
+		e_C = (hcat(cs...))'
+		ρ̄ = hpp.a / hpp.b
+		R = diagm(ones(P) .* ρ̄)
+
+		e_R⁻¹ = inv(R)
+		e_CᵀR⁻¹C = e_C'*e_R⁻¹*e_C
+		e_R⁻¹C = e_R⁻¹*e_C
+		e_CᵀR⁻¹ = e_C'*e_R⁻¹
+		e_log_ρ = log.(1 ./ diag(R))
+		exp_np = Exp_ϕ(e_C, e_R⁻¹, e_CᵀR⁻¹C, e_R⁻¹C, e_CᵀR⁻¹, e_log_ρ)
+		
+		hss, _ = vb_e(ys, exp_np, hpp)
+	end
+	
 	exp_np = missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
@@ -253,13 +257,22 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 		hss, log_Z_ = vb_e(ys, exp_np, hpp)
 
 		# Convergence check
-		kl_ρ_ = sum([kl_gamma(hpp.a, hpp.b, qθ.a_s, (qθ.b_s)[s]) for s in 1:D])
-		kl_C_ = sum([kl_C(zeros(K), hpp.γ, (qθ.μ_C)[s], qθ.Σ_C, exp_ρ[s]) for s in 1:D])
-		
+		kl_ρ_ = sum([kl_gamma(hpp.a, hpp.b, qθ.a_s, (qθ.b_s)) for _ in 1:P])
+		kl_C_ = sum([kl_C(zeros(K), hpp.γ, (qθ.μ_C)[s], qθ.Σ_C, exp_ρ[s]) for s in 1:P])
 		elbo = log_Z_ - kl_ρ_ - kl_C_
 		el_s[i] = elbo
 
-		# Hyper-param learning 
+		if debug
+			println("\nVB iter $i: ")
+			println("\tR: ", inv(exp_np.R⁻¹))
+			println("\tα_r, β_r: ", qθ.a_s, qθ.b_s)
+			println("\tLog Z: ", log_Z_)
+			println("\tKL r: ", kl_ρ_)
+			println("\tKL C: ", kl_C_)
+			println("\tElbo $i: ", elbo)
+		end
+
+		# Hyper-param learning, γ, a, b
 		if (hpp_learn)
 			if (i%5 == 0) 
 				a, b = update_ab(hpp, exp_ρ, exp_log_ρ)
@@ -282,7 +295,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 	end
 		
 	if debug
-		p = plot(el_s, title="ELBO progression")
+		p = plot(el_s, title="Debug ELBO progression")
 		display(p)
 	end
 	return exp_np, elbo_prev, el_s
@@ -291,7 +304,7 @@ end
 function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
 	println("T = $max_T")
-	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2] 
+	C_ = [1.0 0.0; 0.2 0.8; 0.9 0.1] 
 	σ² = 5.0
 	R = Diagonal(ones(3) .* σ²)
 	μ_0 = zeros(2)
@@ -301,11 +314,13 @@ function comp_ppca(max_T = 1000)
 	show(stdout, "text/plain", C_)
 	println("\nGround-truth isotropic co-variance R:")
 	show(stdout, "text/plain", R)
-	seeds = [103, 133, 123, 105, 233]
+	# seeds = [103, 133, 123, 105, 233]
 
+	seeds = [111, 123]
 	for sd in seeds
 		Random.seed!(sd)
 		y, x_true = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, μ_0, Σ_0, max_T)
+		
 		println("\n----- BEGIN Run seed: $sd -----")
 		M_mle = MultivariateStats.fit(PPCA, y; maxoutdim=2) # default MLE
 		println("\n--- MLE ---\n Loading Matrix W:")
@@ -325,19 +340,18 @@ function comp_ppca(max_T = 1000)
 		em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
 		println("reconstruction y MSE, MAD: ", error_metrics(y, em_y_recon))
 
-		# M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
-		# println("\n--- Bayes ---\n Loading Matrix W:")
-		# show(stdout, "text/plain", loadings(M_bay))
-		# println("\n\n", M_bay)
-		# bay_x_pred = MultivariateStats.predict(M_bay, y)
-		# println("latent x error: ", error_metrics(x_true, bay_x_pred))
-		# bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
-		# println("reconstruction y error: ", error_metrics(y, bay_y_recon))
+		M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
+		println("\n--- Bayes ---\n Loading Matrix W:")
+		show(stdout, "text/plain", loadings(M_bay))
+		println("\n\n", M_bay)
+		bay_x_pred = MultivariateStats.predict(M_bay, y)
+		println("latent x error: ", error_metrics(x_true, bay_x_pred))
+		bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
+		println("reconstruction y error: ", error_metrics(y, bay_y_recon))
 
-		# TO-TEST: flat prior
-		hpp = HPP(ones(2) .* 1e-6, 2, 1e-3, zeros(2), Matrix{Float64}(I * 1e7, 2, 2))
+		hpp = HPP(ones(2) .* 1e-6, 2, 1e-4, zeros(2), Matrix{Float64}(I, 2, 2))
 		println("\n--- VBEM ---\n Loading Matrix W:")
-		exp_np, _ = vb_ppca_c(y, hpp, true)
+		exp_np, _ , els = vb_ppca_c(y, hpp, false, init="fixed")
 		show(stdout, "text/plain", exp_np.C)
 		println("\nIsotropic Co-variance R: ")
 		show(stdout, "text/plain", inv(exp_np.R⁻¹))
@@ -346,13 +360,15 @@ function comp_ppca(max_T = 1000)
 		W = exp_np.C
 		WTW = W'*W
 		C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
-		y_recon = W*inv(WTW + I * 1e-5)*C*x_true
+		y_recon = W*inv(WTW)*C*x_true
 		println("y recon MSE, MAD: ", error_metrics(y, y_recon))
+		p = plot(els, title="ELBO progression")
+		display(p)
 		println("----- END Run seed: $sd -----\n")
 	end
 end
 
-#comp_ppca()
+comp_ppca()
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -386,7 +402,7 @@ function k_elbo_p3(y, n=1, hyper_optim=true)
 		for k in 1:2
 			γ = ones(k) .* 1e-6
 			a = 2
-			b = 1e-3
+			b = 1e-4
 			μ_0 = zeros(k)
 			Σ_0 = Matrix{Float64}(I * 1e7, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
@@ -435,9 +451,9 @@ function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false)
 
 	# related to precision of R
 	a = 2
-	b = 1e-3
+	b = 1e-4
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I * 1e7, 2, 2)
+	Σ_0 = Matrix{Float64}(I, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
 	# early stop 
