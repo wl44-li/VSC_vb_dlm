@@ -36,6 +36,7 @@ begin
 	using DataFrames
 	using StatsPlots
 	using StateSpaceModels
+	using KernelDensity
 end
 
 begin
@@ -159,7 +160,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	m_0, c_0 = 0.0, 1e7  # Prior DLM with R setting
 	
 	α = 2  # Shape for Gamma prior
-	β = 1e-3  # rate for Gamma prior
+	β = 1e-4  # rate for Gamma prior
 	
 	# Initial values for the parameters, akin to dlm with R
 	r = 1.0
@@ -211,22 +212,22 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show
 	end
 
 	if show_plot
-		p = plot((s_x[1:end, 1:200]), label = "", title="MCMC Trace Plot x[0:T]")
-		display(p)
+		# p = plot((s_x[1:end, 1:200]), label = "", title="MCMC Trace Plot x[0:T]")
+		# display(p)
 
-		# Agrees with DLM with R example !
+		 # Agrees with DLM with R example !
 		p = plot(x_std, label = "", title="MCMC x std")
 		display(p)
 
-		p = plot_CI_ll(x_m, x_std, x_true)
-		title!(p, "MCMC latent x inference")
-		display(p)
+		# p = plot_CI_ll(x_m, x_std, x_true)
+		# title!(p, "MCMC latent x inference")
+		# display(p)
 
-		p_q = plot(s_q, title="trace q")
-		display(p_q)
+		# p_q = plot(s_q, title="trace q")
+		# display(p_q)
 
-		p_r = plot(s_r, title="trace r")
-		display(p_r)
+		# p_r = plot(s_r, title="trace r")
+		# display(p_r)
 
 		p_r_d = density(R_chain)
 		title!(p_r_d, "MCMC R")
@@ -235,6 +236,7 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show
 		p_q_d = density(Q_chain)
 		title!(p_q_d, "MCMC Q")
 		display(p_q_d)
+
 		return x_m, x_std, s_r, s_q
 	end
 
@@ -540,15 +542,15 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 end
 
 function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
-	mcmc_q = histogram(1 ./ mcmc_s, bins=200, normalize=:pdf, label="MCMC")
-	gamma_dist_q = Gamma(a_q, 1/b_q)
+	mcmc_q = histogram(mcmc_s, bins=200, normalize=:pdf, label="MCMC")
+	gamma_dist_q = InverseGamma(a_q, b_q)
 
 	ci_lower = quantile(gamma_dist_q, 0.025)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
-	x = range(extrema(1 ./mcmc_s)..., length=100) 
+	x = range(extrema(mcmc_s)..., length=200) 
 	pdf_values = pdf.(gamma_dist_q, x)
-	τ_ = plot!(mcmc_q, x, pdf_values, label="VI", lw=2, xlabel="Precision", ylabel="Density")
+	τ_ = plot!(mcmc_q, x, pdf_values, label="VI", lw=2, xlabel="Var", ylabel="Density")
 	
 	plot!(τ_, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
 	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
@@ -589,7 +591,7 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 	"""
 	*** Prior choice and initilisation of VB
 	"""
-	hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e7)
+	hpp_ll = Priors_ll(2, 1e-4, 2, 1e-4, 0.0, 1e7)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
@@ -647,23 +649,37 @@ function test_Nile_ffbs()
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
-	R = 15099.8
-	Q = 1468.4
-	T = length(y)
+	# R = 15099.8
+	# Q = 1468.4
+	# T = length(y)
 	Random.seed!(10)
 
-	Xs = zeros(T, 1000)
-	for iter in 1:1000
-		# DLM with R set c_0 to 1e7
-		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
-		Xs[:, iter] = xs[2:end]
-	end
+	# Xs = zeros(T, 1000)
+	# for iter in 1:1000
+	# 	# DLM with R set c_0 to 1e7
+	# 	xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
+	# 	Xs[:, iter] = xs[2:end]
+	# end
 
 	# FFBS agrees with DLM with R!
-	x_std = std(Xs, dims=2)[:]
-	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
+	#x_std = std(Xs, dims=2)[:]
+	#p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
+	#display(p)
+
+	_, _, s_r, s_q = test_gibbs_ll(y, nothing, 1500, 0, 1)
+	p_s = scatter(s_r, s_q, label="", xlabel="r", ylabel="q")
+	display(p_s)
+
+	kde_rq = kde((s_r, s_q), npoints=(256, 256))
+	p = contour(kde_rq.x, kde_rq.y, kde_rq.density, 
+				title = "Joint KDE of r and q", xlabel = "r", ylabel = "q")
+
+	#xlims!(p, 0.0, 2.5e4)
+	#ylims!(p, 0.0, 4e3)
 	display(p)
 end
+
+test_Nile_ffbs()
 
 function test_nile()
 	y = get_Nile()
@@ -675,8 +691,8 @@ function test_nile()
 	p_obs_r = plot()
 	p_sys_q = plot()
 
-	for _ in 1:10
-		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 25000, 10000, 5)
+	for _ in 1:20
+		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 30000, 0, 10)
 		_, _, q_rq, els = test_vb_ll(y)
 
 		density!(p_obs_r, r_chain)
@@ -701,14 +717,14 @@ function test_nile()
 	display(p_obs_r)
 end
 
-test_nile()
+#test_nile()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, label="MCMC", color=:red, alpha=0.7)
-	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.4)
+	p_mcmc = scatter(mcmc, vi, label="MCMC", color=:red, alpha=0.5)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.5)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
@@ -741,8 +757,8 @@ end
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
-	R = 10.0
-	Q = 10.0
+	R = 10000.0
+	Q = 1000.0
 	println("Ground-truth r = $R, q = $Q")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
@@ -766,7 +782,13 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
 
-	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, 1/R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, 1/Q)
+	kde_result = kde((rs, qs))
+	p = contour(kde_result.x, kde_result.y, kde_result.density, 
+				title = "Joint KDE of r and q", xlabel = "r", ylabel = "q")
+
+	display(p)
+
+	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q)
 	display(plot_r)
 	display(plot_q)
 

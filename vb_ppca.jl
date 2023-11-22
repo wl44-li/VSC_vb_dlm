@@ -59,7 +59,7 @@ begin
 end
 
 function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
-	D, T = size(ys)
+	P, T = size(ys)
 	W_C = ss.W_C
 	S_C = ss.S_C
 	γ = hps.γ
@@ -69,12 +69,12 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	
 	# q(ρ), q(C|ρ)
 	Σ_C = inv(diagm(γ) + W_C)
-	μ_C = [Σ_C * S_C[:, s] for s in 1:D]
+	μ_C = [Σ_C * S_C[:, s] for s in 1:P]
 	
 	G = ys * ys' - S_C' * Σ_C * S_C
 	a_ = a + 0.5 * T
-	a_s = a_ * ones(D)
-    b_s = [b + 0.5 * G[i, i] for i in 1:D]
+	a_s = a_ * ones(P)
+    b_s = [b + 0.5 * G[i, i] for i in 1:P]
 	
 	q_ρ = missing
 	
@@ -109,7 +109,7 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 
 	# for updating gamma hyperparam a, b       
 	exp_ρ = a_s ./ b_s
-	exp_log_ρ = [(digamma(a_) - log(b_s[i])) for i in 1:D]
+	exp_log_ρ = [(digamma(a_) - log(b_s[i])) for i in 1:P]
 	
 	# return expected natural parameters :: Exp_ϕ (for e-step)
 	return Exp_ϕ(Exp_C, Exp_R⁻¹, Exp_CᵀR⁻¹C, Exp_R⁻¹C, Exp_CᵀR⁻¹, exp_log_ρ), γ_n, exp_ρ, exp_log_ρ, Qθ(Σ_C, μ_C, a_, b_s)

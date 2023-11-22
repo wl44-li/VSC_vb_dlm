@@ -1,4 +1,5 @@
 # import Pkg
+# Pkg.add("KernelDensity")
 # Pkg.add("MCMCChains")
 # Pkg.add("StatsBase")
 # Pkg.add("PDMats")
