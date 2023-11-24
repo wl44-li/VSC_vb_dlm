@@ -10,6 +10,7 @@ begin
 end
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
+	Random.seed!(10)
 	K, _ = size(A)
 	D, _ = size(C)
 	x = zeros(K, T)
@@ -66,10 +67,11 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	b = hps.b
 	K = length(γ)
 	
-	# q(ρ), q(C|ρ)
+	# q(C|ρ)
 	Σ_C = inv(diagm(γ) + W_C)
 	μ_C = [Σ_C * S_C[:, s] for s in 1:P]
 	
+	# q(ρ) 
 	G = ys * ys' - S_C' * Σ_C * S_C
 	a_s = a + 0.5 * T * P
     b_s = b + 0.5 * tr(G)
@@ -213,30 +215,19 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="fixed", debug=false)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=false)
 	P, _ = size(ys)
 	K = length(hpp.γ)
 	hss = missing
 
 	if init == "mle"
 		# use MLE esitmate of σ and C to run VBE-step first
+		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
+		σ²_init = M_mle.σ² .* (1 + randn() * 0.2) 
+		e_C = M_mle.W * (1 + randn() * 0.2) 
 
-	end
-
-	if init == "fixed"
-		W_C = Matrix{Float64}(P*I, K, K)
-		S_C = Matrix{Float64}(P*I, K, P)
-		hss = HSS_PPCA(W_C, S_C)
-	end
-
-	if init == "random"
-		# init R and C, needs more testing
-		cs = [rand(MvNormal(zeros(K), I)) for _ in 1:P]
-		e_C = (hcat(cs...))'
-		ρ̄ = hpp.a / hpp.b
-		R = diagm(ones(P) .* ρ̄)
-
+		R = diagm(ones(P) .* σ²_init)
 		e_R⁻¹ = inv(R)
 		e_CᵀR⁻¹C = e_C'*e_R⁻¹*e_C
 		e_R⁻¹C = e_R⁻¹*e_C
@@ -245,6 +236,68 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 		exp_np = Exp_ϕ(e_C, e_R⁻¹, e_CᵀR⁻¹C, e_R⁻¹C, e_CᵀR⁻¹, e_log_ρ)
 		
 		hss, _ = vb_e(ys, exp_np, hpp)
+		if debug
+			println("C_init: ", e_C)
+			println("R_init: ", R)
+			println("w_c, s_c :", hss)
+		end
+	end
+
+	if init == "em"
+		# use EM esitmate of σ and C to run VBE-step first
+		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
+
+		σ²_init = M_em.σ² .* (1 + randn() * 0.2) 
+		e_C = M_em.W * (1 + randn() * 0.2) 
+
+		R = diagm(ones(P) .* σ²_init)
+		e_R⁻¹ = inv(R)
+		e_CᵀR⁻¹C = e_C'*e_R⁻¹*e_C
+		e_R⁻¹C = e_R⁻¹*e_C
+		e_CᵀR⁻¹ = e_C'*e_R⁻¹
+		e_log_ρ = log.(1 ./ diag(R))
+		exp_np = Exp_ϕ(e_C, e_R⁻¹, e_CᵀR⁻¹C, e_R⁻¹C, e_CᵀR⁻¹, e_log_ρ)
+		
+		hss, _ = vb_e(ys, exp_np, hpp)
+		if debug
+			println("C_init: ", e_C)
+			println("R_init: ", R)
+			println("w_c, s_c :", hss)
+		end
+	end
+
+	if init == "fixed"
+		W_C = Matrix{Float64}(P*I, K, K)
+		S_C = Matrix{Float64}(P*I, K, P)
+		hss = HSS_PPCA(W_C, S_C)
+
+		if debug
+			println("w_c, s_c :", hss)
+		end
+	end
+
+	if init == "random"
+		# init R and C, needs more testing
+		#ρ̄ = hpp.a / hpp.b
+		ρ_init = 0.5 / 0.5
+		R = diagm(ones(P) .* ρ_init)
+
+		cs = [rand(MvNormal(zeros(K), (1/ρ_init) * I)) for _ in 1:P]
+		e_C = (hcat(cs...))'
+		
+		e_R⁻¹ = inv(R)
+		e_CᵀR⁻¹C = e_C'*e_R⁻¹*e_C
+		e_R⁻¹C = e_R⁻¹*e_C
+		e_CᵀR⁻¹ = e_C'*e_R⁻¹
+		e_log_ρ = log.(1 ./ diag(R))
+		exp_np = Exp_ϕ(e_C, e_R⁻¹, e_CᵀR⁻¹C, e_R⁻¹C, e_CᵀR⁻¹, e_log_ρ)
+		
+		hss, _ = vb_e(ys, exp_np, hpp)
+		if debug
+			println("C_init: ", e_C)
+			println("R_init: ", R)
+			println("w_c, s_c, :", hss)
+		end
 	end
 	
 	exp_np = missing
@@ -267,8 +320,8 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 			println("\tR: ", inv(exp_np.R⁻¹))
 			println("\tα_r, β_r: ", qθ.a_s, qθ.b_s)
 			println("\tLog Z: ", log_Z_)
-			println("\tKL r: ", kl_ρ_)
-			println("\tKL C: ", kl_C_)
+			println("\tKL r (gamma): ", kl_ρ_)
+			println("\tKL C (Normal): ", kl_C_)
 			println("\tElbo $i: ", elbo)
 		end
 
@@ -305,7 +358,7 @@ function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
 	println("T = $max_T")
 	C_ = [1.0 0.0; 0.2 0.8; 0.9 0.1] 
-	σ² = 5.0
+	σ² = 3.0
 	R = Diagonal(ones(3) .* σ²)
 	μ_0 = zeros(2)
 	Σ_0 = Matrix{Float64}(I, 2, 2)
@@ -368,7 +421,7 @@ function comp_ppca(max_T = 1000)
 	end
 end
 
-comp_ppca()
+#comp_ppca()
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -390,38 +443,80 @@ VI always reaches the same ELBO with fixed initialisations
 - MLE result of σ² -> run E-step first
 """
 
-function k_elbo_p3(y, n=1, hyper_optim=true)
+function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 	elbos_k1 = zeros(n)
 	elbos_k2 = zeros(n)  
+	elbos_k3 = zeros(n)
+	p_elbo_k1 = plot()
+	p_elbo_k2 = plot()
+	p_elbo_k3 = plot()
+
+	title!(p_elbo_k1, "K=1")
+	title!(p_elbo_k2, "K=2")
+	title!(p_elbo_k3, "K=3")
 
 	index_1 = 1
 	index_2 = 1
+	index_3 = 1
 
 	for _ in 1:n
-
-		for k in 1:2
-			γ = ones(k) .* 1e-6
+		for k in 1:3
+			#γ = ones(k) * 1e-5
+			γ = ones(k)
 			a = 2
 			b = 1e-4
 			μ_0 = zeros(k)
-			Σ_0 = Matrix{Float64}(I * 1e7, k, k)
+			Σ_0 = Matrix{Float64}(I, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
-			_, el = vb_ppca_c(y, hpp, hyper_optim)
+
+			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim)
 
 			if k == 1
-				elbos_k1[index_1] = el
+				plot!(p_elbo_k1, els, label="", ylabel="ELBO", xlabel="Iterations")
+				elbos_k1[index_1] = el_end
 				index_1+=1
+
+				if verboseOut
+					println("\n--- VBEM k=$k ---\n Loading Matrix W:")
+					show(stdout, "text/plain", exp_end.C)
+					println("\nIsotropic noise ", inv(exp_end.R⁻¹)[1, 1])
+				end
 			end
 
 			if k == 2
-				elbos_k2[index_2] = el
+				plot!(p_elbo_k2, els, label="", ylabel="ELBO", xlabel="Iterations")
+				
+				if verboseOut
+					println("\n--- VBEM k=$k ---\n Loading Matrix W:")
+					show(stdout, "text/plain", exp_end.C)
+					println("\nIsotropic noise ", inv(exp_end.R⁻¹)[1, 1])
+				end
+				elbos_k2[index_2] = el_end
 				index_2+=1
+			end
+
+			if k == 3
+				plot!(p_elbo_k3, els, label="", ylabel="ELBO", xlabel="Iterations")
+				elbos_k3[index_3] = el_end
+				index_3+=1
 			end
 		end
 	end
 
-	println(elbos_k1)
-	println(elbos_k2)
+	if verboseOut
+		println("final ELBO of K=1:", elbos_k1)
+		println("final ELBO of K=2:", elbos_k2)
+		println("final ELBO of K=3:", elbos_k3)
+	end
+
+	println("--- FINAL ElBO mean: ---")
+	println("\tK=1:", mean(elbos_k1))
+	println("\tK=2:", mean(elbos_k2))
+	println("\tK=3:", mean(elbos_k3))
+
+	display(p_elbo_k1)
+	display(p_elbo_k2)
+	display(p_elbo_k3)
 
 	# groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
 	# all_elbos = vcat(elbos_k1, elbos_k2)
@@ -433,34 +528,42 @@ end
 
 function main(n)
 	# P = 3, K = 2
-	C_ = [1.0 0.0; 0.1 0.8; 0.9 0.2]
-	σ² = 0.5
-	R = Diagonal(ones(3) .* σ²)
+	C_ = [1.0 0.0; 1.1 1.0; 0.3 0.8; 0.9 0.1]
+	σ² = 5.0
+	R = Diagonal(ones(4) .* σ²)
 
-	println("Ground-truth Loading Matrix W:")
+	println("Ground-truth\nLoading Matrix W:")
 	show(stdout, "text/plain", C_)
-	println("\nσ²: ", σ²)
+	println("\nIsotropic noise σ²: ", σ²)
 	y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal(ones(2)), n)
-	k_elbo_p3(y)
+	k_elbo_p4(y, 10, false, verboseOut=false)
 end
 
+main(5000)
+
 # for MNIST data
-function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false)
+function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false; debug=false)
 	# related to row-precision of C
 	γ = ones(2) .* 1e-6
 
 	# related to precision of R
 	a = 2
 	b = 1e-4
+
 	μ_0 = zeros(2)
 	Σ_0 = Matrix{Float64}(I, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	# early stop 
 	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter)
+
+	if debug
+		println("ELBOs: ", els)
+	end
 
 	p_el = plot(els, title="PPCA ELBO progression", margin = 5mm)
 	display(p_el)
+
+	# return matrix of factor loadings
 	return exp_np.C
 end
 

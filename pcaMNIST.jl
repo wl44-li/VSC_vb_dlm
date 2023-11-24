@@ -44,10 +44,20 @@ function compare_0(train_y, train_labels, M)
 
     x0, xn0 = M'*y0, M'*yn0
 
-    scatter(x0[1,:], x0[2,:], c=:red, label="Digit 0", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    scatter(x0[1, :], x0[2, :], c=:red, label="Digit 0", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter!(xn0[1,:], xn0[2,:], c=:blue, label="Digit {1:9}", ms=0.8, msw=0)
+    scatter!(xn0[1, :], xn0[2, :], c=:blue, label="Digit {1:9}", ms=0.8, msw=0)
 end
+
+function plot_number(train_y, train_labels, number, M)
+    img_n = train_y[:, :, findall(x -> x == number, train_labels)]
+    y_n = hcat([vcat(float.(img_n[:, :, t])...) for t in 1:size(img_n, 3)]...)
+
+    x_n = M' * y_n
+    scatter(x_n[1, :], x_n[2, :], c=:red, label="Digit $number", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    legend = :topright, xlabel="PC 1", ylabel="PC 2")
+end
+
 
 function test_MNIST(test_prop=100, standardise = true, method = "pca")
     train_y, train_labels = MNIST(split=:train)[:]
@@ -114,21 +124,28 @@ On-going PPCA-VB Testing
 - check ELBO always increasing
 - prior choices
 - random starts 
-- D = 28 x 28, K = 2
+- P = 28 x 28 = 784, K = 2
 """
 
 train_y, train_labels = MNIST(split=:train)[:]
-
-#train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
+train_y, train_labels = train_y[:, :, 1:12000], train_labels[1:12000]
 
 T = size(train_y, 3)
 y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 y = zscore(y, 1)
 
-# pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
-# M = projection(pca)
 
-C = vb_ppca_k2(y, 100, false)
+C = vb_ppca_k2(y, 50, false, debug=false)
 M = svd(C).U
 
-compare_0(train_y, train_labels, M)
+#compare_0(train_y, train_labels, M)
+plot_number(train_y, train_labels, 0, M)
+
+plot_number(train_y, train_labels, 1, M)
+
+
+pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
+M_pca = projection(pca)
+
+plot_number(train_y, train_labels, 0, M_pca)
+plot_number(train_y, train_labels, 1, M_pca)
