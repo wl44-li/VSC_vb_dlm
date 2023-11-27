@@ -51,7 +51,10 @@ Primiary testing shows poor convergence results in 3 hours, T=500, trivial test
     end
 end
 
-
+"""
+Corrected model, NUTS (~ 1 hr), HMC (~ 20 mins), iteration 5000
+NUTS (~ ), HMC (~ 10 mins), iteration 3000
+"""
 @model function ppca_alt(y, K)
     P, T = size(y)
 
@@ -73,30 +76,65 @@ end
     end
 end
 
-function nuts_ppca(y, mcmc=5000, burn_in=1000)
-    model = ppca_Turing(y, 1, 2, 1e-3, 1)
-    chain = Turing.sample(model, NUTS(), mcmc)
-    return chain[burn_in+1:end]
-end
-
-function nuts_ppca_alt(y, mcmc=5000, burn_in=1000)
+function nuts_ppca_alt(y, mcmc=3000, burn_in=1000)
     model = ppca_alt(y, 1)
     chain = Turing.sample(model, NUTS(), mcmc)
     return chain[burn_in+1:end]
 end
 
-function hmc_ll(y, mcmc=5000, burn_in=1000)
-    model = ppca_Turing(y, 1, 2, 1e-3, 1)
+function hmc_ppca(y, mcmc=3000, burn_in=1000)
+    model = ppca_alt(y, 1)
     chain = Turing.sample(model, HMC(0.05, 5), mcmc)
     return chain[burn_in+1:end]
 end
 
-T = 500
-C_d2k1 = reshape([1.0, 0.5], 2, 1)
-R_2 = Diagonal([1.0, 1.0])
-y, x = gen_data([0.0], C_d2k1, [1.0], R_2, 0.0, T)
+function test_nuts()
+    T = 500
+    C_d2k1 = reshape([1.0, 0.5], 2, 1)
+    R_2 = Diagonal([1.0, 1.0])
+    y, _ = gen_data([0.0], C_d2k1, [1.0], R_2, 0.0, T)
 
-#println(size(y), size(x))
+    nuts_chain = nuts_ppca_alt(y)
 
-nuts_chain = nuts_ppca_alt(y)
+    τs = nuts_chain[:τ]
+    p_τ = plot(τs, label = "NUTS τ")
+    display(p_τ)
+    p_t = density(τs, label = "τ")
+    display(p_t)
 
+    c1s, c2s = nuts_chain[Symbol("C[1,1]")].data, nuts_chain[Symbol("C[1,2]")].data
+    
+    p1 = density(c1s, label = "C[1, 1]")
+    display(p1)
+    p2 = density(c2s, label = "C[2, 1]")
+    display(p2)
+
+    return nuts_chain
+end
+
+function test_hmc()
+    T = 500
+    C_d2k1 = reshape([1.0, 0.5], 2, 1)
+    R_2 = Diagonal([1.0, 1.0])
+    y, _ = gen_data([0.0], C_d2k1, [1.0], R_2, 0.0, T)
+
+    hmc_chain = hmc_ppca(y)
+
+    τs = hmc_chain[:τ]
+    p_τ = plot(τs, label = "HMC τ")
+    display(p_τ)
+    p_t = density(τs, label = "τ")
+    display(p_t)
+
+    c1s, c2s = hmc_chain[Symbol("C[1,1]")].data, hmc_chain[Symbol("C[1,2]")].data
+
+    p1 = density(c1s, label = "C[1, 1]")
+    display(p1)
+    p2 = density(c2s, label = "C[2, 1]")
+    display(p2)
+    return hmc_chain
+end
+
+hmc_chain = test_hmc()
+
+nuts_chain = test_nuts()
