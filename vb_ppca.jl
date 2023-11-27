@@ -237,6 +237,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 		
 		hss, _ = vb_e(ys, exp_np, hpp)
 		if debug
+			println("--- Init PPCA with MLE ---")
 			println("C_init: ", e_C)
 			println("R_init: ", R)
 			println("w_c, s_c :", hss)
@@ -260,6 +261,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 		
 		hss, _ = vb_e(ys, exp_np, hpp)
 		if debug
+			println("--- Init PPCA with EM ---")
 			println("C_init: ", e_C)
 			println("R_init: ", R)
 			println("w_c, s_c :", hss)
@@ -294,6 +296,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 		
 		hss, _ = vb_e(ys, exp_np, hpp)
 		if debug
+			println("--- Init PPCA Random ---")
 			println("C_init: ", e_C)
 			println("R_init: ", R)
 			println("w_c, s_c, :", hss)
@@ -357,7 +360,7 @@ end
 function comp_ppca(max_T = 1000)
 	println("Running experiments for PPCA")
 	println("T = $max_T")
-	C_ = [1.0 0.0; 0.2 0.8; 0.9 0.1] 
+	C_ = [1.0 0.0; 0.2 1.0; 0.9 0.1] 
 	σ² = 3.0
 	R = Diagonal(ones(3) .* σ²)
 	μ_0 = zeros(2)
@@ -367,58 +370,51 @@ function comp_ppca(max_T = 1000)
 	show(stdout, "text/plain", C_)
 	println("\nGround-truth isotropic co-variance R:")
 	show(stdout, "text/plain", R)
-	# seeds = [103, 133, 123, 105, 233]
 
-	seeds = [111, 123]
-	for sd in seeds
-		Random.seed!(sd)
-		y, x_true = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, μ_0, Σ_0, max_T)
-		
-		println("\n----- BEGIN Run seed: $sd -----")
-		M_mle = MultivariateStats.fit(PPCA, y; maxoutdim=2) # default MLE
-		println("\n--- MLE ---\n Loading Matrix W:")
-		show(stdout, "text/plain", loadings(M_mle))
-		println("\n\n", M_mle)
-		mle_x_pred = MultivariateStats.predict(M_mle, y)
-		println("latent x MSE, MAD: ", error_metrics(x_true, mle_x_pred))
-		mle_y_recon = MultivariateStats.reconstruct(M_mle, x_true)
-		println("reconstruction y MSE, MAD: ", error_metrics(y, mle_y_recon))
+	y, x_true = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, μ_0, Σ_0, max_T)
+	
+	M_mle = MultivariateStats.fit(PPCA, y; maxoutdim=2) # default MLE
+	println("\n--- MLE ---\n Loading Matrix W:")
+	show(stdout, "text/plain", loadings(M_mle))
+	println("\n\n", M_mle)
+	mle_x_pred = MultivariateStats.predict(M_mle, y)
+	println("latent x MSE, MAD: ", error_metrics(x_true, mle_x_pred))
+	mle_y_recon = MultivariateStats.reconstruct(M_mle, mle_x_pred)
+	println("reconstruction y MSE, MAD: ", error_metrics(y, mle_y_recon))
 
-		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
-		println("\n--- EM ---\n Loading Matrix W:")
-		show(stdout, "text/plain", loadings(M_em))
-		println("\n\n", M_em)
-		em_x_pred = MultivariateStats.predict(M_em, y)
-		println("latent x MSE, MAD: ", error_metrics(x_true, em_x_pred))
-		em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
-		println("reconstruction y MSE, MAD: ", error_metrics(y, em_y_recon))
+	M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
+	println("\n--- EM ---\n Loading Matrix W:")
+	show(stdout, "text/plain", loadings(M_em))
+	println("\n\n", M_em)
+	em_x_pred = MultivariateStats.predict(M_em, y)
+	println("latent x MSE, MAD: ", error_metrics(x_true, em_x_pred))
+	em_y_recon = MultivariateStats.reconstruct(M_em, x_true)
+	println("reconstruction y MSE, MAD: ", error_metrics(y, em_y_recon))
 
-		M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
-		println("\n--- Bayes ---\n Loading Matrix W:")
-		show(stdout, "text/plain", loadings(M_bay))
-		println("\n\n", M_bay)
-		bay_x_pred = MultivariateStats.predict(M_bay, y)
-		println("latent x error: ", error_metrics(x_true, bay_x_pred))
-		bay_y_recon = MultivariateStats.reconstruct(M_bay, x_true)
-		println("reconstruction y error: ", error_metrics(y, bay_y_recon))
+	M_bay = MultivariateStats.fit(PPCA, y; method=(:bayes), maxoutdim=2)
+	println("\n--- Bayes ---\n Loading Matrix W:")
+	show(stdout, "text/plain", loadings(M_bay))
+	println("\n\n", M_bay)
+	bay_x_pred = MultivariateStats.predict(M_bay, y)
+	println("latent x error: ", error_metrics(x_true, bay_x_pred))
+	bay_y_recon = MultivariateStats.reconstruct(M_bay, bay_x_pred)
+	println("reconstruction y error: ", error_metrics(y, bay_y_recon))
 
-		hpp = HPP(ones(2) .* 1e-6, 2, 1e-4, zeros(2), Matrix{Float64}(I, 2, 2))
-		println("\n--- VBEM ---\n Loading Matrix W:")
-		exp_np, _ , els = vb_ppca_c(y, hpp, false, init="fixed")
-		show(stdout, "text/plain", exp_np.C)
-		println("\nIsotropic Co-variance R: ")
-		show(stdout, "text/plain", inv(exp_np.R⁻¹))
-		ωs, _, _ = v_forward(y, exp_np, hpp)
-		println("\nlatent x MSE, MAD: ", error_metrics(x_true, ωs))
-		W = exp_np.C
-		WTW = W'*W
-		C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
-		y_recon = W*inv(WTW)*C*x_true
-		println("y recon MSE, MAD: ", error_metrics(y, y_recon))
-		p = plot(els, title="ELBO progression")
-		display(p)
-		println("----- END Run seed: $sd -----\n")
-	end
+	hpp = HPP(ones(2), 2, 1e-4, zeros(2), Matrix{Float64}(I, 2, 2))
+	println("\n--- VBEM ---\n Loading Matrix W:")
+	exp_np, _ , els = vb_ppca_c(y, hpp, false, init="fixed")
+	show(stdout, "text/plain", exp_np.C)
+	println("\nIsotropic Co-variance R: ")
+	show(stdout, "text/plain", inv(exp_np.R⁻¹))
+	ωs, _, _ = v_forward(y, exp_np, hpp)
+	println("\nlatent x MSE, MAD: ", error_metrics(x_true, ωs))
+	W = exp_np.C
+	WTW = W'*W
+	C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
+	y_recon = W*inv(WTW)*C*ωs
+	println("y recon MSE, MAD: ", error_metrics(y, y_recon))
+	p = plot(els, title="ELBO progression", label="")
+	display(p)
 end
 
 #comp_ppca()
@@ -469,7 +465,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 			Σ_0 = Matrix{Float64}(I, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim)
+			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim, init="random")
 
 			if k == 1
 				plot!(p_elbo_k1, els, label="", ylabel="ELBO", xlabel="Iterations")
@@ -518,17 +514,17 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 	display(p_elbo_k2)
 	display(p_elbo_k3)
 
-	# groups = repeat(["K = 1", "K = 2"], inner = length(elbos_k1))
-	# all_elbos = vcat(elbos_k1, elbos_k2)
+	groups = repeat(["K = 1", "K = 2", "K = 3"], inner = length(elbos_k1))
+	all_elbos = vcat(elbos_k1, elbos_k2, elbos_k3)
 
-	# p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange], label="", ylabel="ELBO", legend=false)
-	# title!(p2, "ELBO Model Selection, K=2")
-    # display(p2)
+	p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ELBO", legend=false)
+	title!(p2, "ELBO Model Selection, K=2")
+    display(p2)
 end
 
 function main(n)
 	# P = 4, K = 2 truth
-	C_ = [1.0 0.0; 1.1 1.0; 0.3 0.8; 0.9 0.1]
+	C_ = [1.0 0.0; 0.5 1.0; 0.3 0.8; 0.9 0.1]
 	σ² = 5.0
 	R = Diagonal(ones(4) .* σ²)
 
@@ -542,19 +538,20 @@ end
 main(5000)
 
 # for MNIST data
-function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false; debug=false)
+function vb_ppca_k2(y::Matrix{Float64}, em_iter=100, hp_optim=false; debug=false)
 	# related to row-precision of C
-	γ = ones(2) .* 1e-6
+	# γ = ones(2) .* 1e-6
+	γ = ones(2)
 
 	# related to precision of R
 	a = 2
-	b = 1e-4
+	b = 1e-3
 
 	μ_0 = zeros(2)
 	Σ_0 = Matrix{Float64}(I, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter)
+	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init="random")
 
 	if debug
 		println("ELBOs: ", els)

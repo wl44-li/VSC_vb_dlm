@@ -90,7 +90,7 @@ end
 # test_rq(12)
 # test_rq(12, 1000)
 
-function forward_filter(y, A, C, R, Q, m_0, c_0)
+function forward_fil(y, A, C, R, Q, m_0, c_0)
 	T = length(y)
     ms = Vector{Float64}(undef, T+1)
     cs = Vector{Float64}(undef, T+1)
@@ -116,7 +116,7 @@ end
 function sample_x_ffbs(y, A, C, R, Q, m_0, c_0)
 	T = length(y)
 	x = Vector{Float64}(undef, T+1)
-	ms, cs, a_s, rs = forward_filter(y, A, C, R, Q, m_0, c_0)
+	ms, cs, a_s, rs = forward_fil(y, A, C, R, Q, m_0, c_0)
 	
 	# t = T
     x[end] = rand(Normal(ms[end], sqrt(cs[end])))
@@ -679,7 +679,7 @@ function test_Nile_ffbs()
 	display(p)
 end
 
-test_Nile_ffbs()
+#test_Nile_ffbs()
 
 function test_nile()
 	y = get_Nile()

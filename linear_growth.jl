@@ -1,4 +1,5 @@
 include("kl_optim.jl")
+include("test_data.jl")
 module LinearGrowth
 
 begin
@@ -64,6 +65,38 @@ function vb_m_step(y, hss::HSS, hpp::HPP_D, A::Array{Float64, 2}, C::Array{Float
 
 	H = Diagonal([H_11, H_22])
 	β_s = [hpp.β + 0.5 * H[i, i] for i in 1:K]
+
+	# q_𝛐 = missing
+	# try
+	# 	q_𝛐 = Gamma.(α_s, 1 ./ β_s)
+	# catch err
+	#     if isa(err, DomainError)
+	#         println("DomainError occurred: ")
+			
+	# 		println("H_11: ", H_11)
+	# 		println("H_22: ", H_22)
+	# 		println("α_s: ", α_s)
+	# 		println("β_s: ", β_s)
+	# 		β_s = abs.(β_s)
+	# 		println("Temporary fix: ", β_s)
+
+	# 		# if H_11 < 0
+	# 		# 	H_11 = 1e-3
+	# 		# end
+
+	# 		# if H_22 < 0
+	# 		# 	H_22 = 1e-3
+	# 		# end
+
+	# 		# H = Diagonal([H_11, H_22])
+	# 		# β_s = [hpp.β + 0.5 * H[i, i] for i in 1:K]
+
+	# 		q_𝛐 = Gamma.(α_s, 1 ./ β_s)
+	#     else
+	#         rethrow(err)
+	# 	end
+	# end
+
 	q_𝛐 = Gamma.(α_s, 1 ./ β_s)
 	Exp_Q⁻¹= diagm(mean.(q_𝛐))
 	return Exp_R⁻¹, Exp_Q⁻¹, Q_Gamma(a_, b_s, α_, β_s)
@@ -202,7 +235,6 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 		hss = HSS(ones(size(A)), ones(size(A)), ones(size(C')), ones(size(A)))
 	end
 
-
 	E_R_inv, E_Q_inv = missing, missing
 	elbo_prev = -Inf
 	el_s = zeros(max_iter)
@@ -223,8 +255,8 @@ function vbem_lg_c(y, A::Array{Float64, 2}, C::Array{Float64, 2}, prior::HPP_D, 
 			println("\tR: ", inv(E_R_inv))
 			println("\tα_r, β_r, α_q, β_q: ", Q_gam)
 			println("\tLog Z: ", log_Z)
-			println("\tKL r: ", kl_ρ)
-			println("\tKL r: ", kl_𝛐)
+			println("\tKL R: ", kl_ρ)
+			println("\tKL Q: ", kl_𝛐)
 			println("\tElbo $i: ", elbo)
 		end
 
@@ -671,7 +703,7 @@ function main_graph(n, sd)
 	println("----- END Run seed: $sd -----\n")
 end
 
-main_graph(1000, 123)
+#main_graph(1000, 123)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

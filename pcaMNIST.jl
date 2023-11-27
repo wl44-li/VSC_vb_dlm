@@ -12,9 +12,6 @@ using StatsBase
 pyplot()
 
 """ DEBUG zero-forcing VB-PPCA
-- package :em, :bayes option will not run
-- package default mle option agrees with standard pca
-
 Consider reduce EM iterations (early stop before iter 100, 50, 30, 10)
 
 Consider standardise data? (get rid of the 0s from the white pixels)
@@ -57,7 +54,6 @@ function plot_number(train_y, train_labels, number, M)
     scatter(x_n[1, :], x_n[2, :], c=:red, label="Digit $number", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
 end
-
 
 function test_MNIST(test_prop=100, standardise = true, method = "pca")
     train_y, train_labels = MNIST(split=:train)[:]
@@ -103,7 +99,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     # end
 
     if method == "vbem"
-        C = vb_ppca_k2(y, 10, false)
+        C = vb_ppca_k2(y, 100, false, debug=false)
         M = svd(C).U
     end
 
@@ -134,18 +130,22 @@ T = size(train_y, 3)
 y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 y = zscore(y, 1)
 
-
-C = vb_ppca_k2(y, 50, false, debug=false)
+C = vb_ppca_k2(y, 500, false, debug=false)
 M = svd(C).U
 
-#compare_0(train_y, train_labels, M)
 plot_number(train_y, train_labels, 0, M)
-
 plot_number(train_y, train_labels, 1, M)
 
+"""
+Package usage debug? Unable to set outputdim to 2
+- Hence MLE, EM init is not guranteed to work
+- MLE, EM option not able to run with MNIST PPCA
+"""
 
-pca = MultivariateStats.fit(PCA, y; maxoutdim=2)
-M_pca = projection(pca)
+# mle = MultivariateStats.fit(PPCA, y; mean=0, maxoutdim=2)
+# M_mle = projection(mle)
+# plot_number(train_y, train_labels, 0, M_mle)
+# plot_number(train_y, train_labels, 1, M_mle)
 
-plot_number(train_y, train_labels, 0, M_pca)
-plot_number(train_y, train_labels, 1, M_pca)
+# size(y)
+# M_em = MultivariateStats.fit(PPCA, y; mean=0, method=(:em), maxoutdim=2)

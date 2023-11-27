@@ -147,10 +147,21 @@ end
 
 #test_e_static()
 
-function vb_ss(ys, A, C, prior::HPP_D, max_iter=200, tol=1e-5)
+function vb_ss(ys, A, C, prior::HPP_D, max_iter=500, tol=1e-4, init="random")
 	D, _ = size(ys)
     E_R = missing
-    W_C, S_C = ones(size(A)), ones(size(C'))
+    W_C, S_C = missing, missing
+
+    if init == "random"
+        r = rand(InverseGamma(prior.a, prior.b))
+        R_init = diagm(ones(D) .* r)
+        W_C, S_C, _ = vb_e_static(ys, A, C, R_init, prior)
+    end
+
+    if init == "fixed"
+        W_C, S_C = ones(size(A)), ones(size(C'))
+    end
+
     elbo_prev = -Inf
 	el_s = zeros(max_iter)
 
@@ -181,7 +192,7 @@ end
 function test_vb_static(iter)
     T = 500  # Number of time steps
     rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
-    r = 0.1  # Observation noise variance
+    r = 0.5  # Observation noise variance
     A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
     C = [1.0 0.0 0.0]  # Emission matrix
     Q = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
@@ -204,23 +215,19 @@ function test_vb_static(iter)
     plot_latent(x', μs')
 end
 
-"""
-TO-DO: ELBO Comparison for model selection (local level, linear growth, seasonal)
-"""
 
-function vi_elbo_comp(gen_fun = "S", max_T = 500)
-	seeds = [111, 133, 123, 105, 233, 88, 145, 236, 104, 1]
-    elbo_lg = zeros(10)
-    elbo_ll = zeros(10)
-    elbo_ss = zeros(10)
+function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
+    elbo_lg = zeros(n)
+    elbo_ll = zeros(n)
+    elbo_ss = zeros(n)
 
-    for i in 1:length(seeds)
+    for i in 1:n
         y, x_true = missing, missing
-        Random.seed!(seeds[i])
+        Random.seed!(i)
 
         if gen_fun == "S"
             rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
-            r = 0.1  # Observation noise variance
+            r = 0.5  # Observation noise variance
             A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
             C = [1.0 0.0 0.0]  # Emission matrix
             Q = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
@@ -244,7 +251,6 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
             prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
             _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
             elbo_lg[i] = el_lg[end]
-
         end
 
         if gen_fun == "LL"
@@ -295,9 +301,15 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
 
     end
 
-    println(elbo_ss)
-    println(elbo_ll)
-    println(elbo_lg)
+    # println(elbo_ss)
+    # println(elbo_ll)
+    # println(elbo_lg)
+
+    println("--- FINAL ElBO mean: ---")
+	println("\tLL:", mean(elbo_ll))
+	println("\tLT:", mean(elbo_lg))
+	println("\tSS:", mean(elbo_ss))
+    
     groups = repeat(["LLM", "LTM", "SM"], inner = length(elbo_ll))
     all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
 
@@ -306,8 +318,8 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500)
     display(p)
 end
 
-#vi_elbo_comp("S")
+vi_elbo_comp("S")
 
 #vi_elbo_comp("LL")
 
-vi_elbo_comp("LT")
+#vi_elbo_comp("LT")
