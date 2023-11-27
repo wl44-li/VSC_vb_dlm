@@ -11,8 +11,8 @@ end
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
 	Random.seed!(10)
-	K, _ = size(A)
-	D, _ = size(C)
+	K = size(A, 1)
+	D = size(C, 1)
 	x = zeros(K, T)
 	y = zeros(D, T)
 
@@ -527,7 +527,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 end
 
 function main(n)
-	# P = 3, K = 2
+	# P = 4, K = 2 truth
 	C_ = [1.0 0.0; 1.1 1.0; 0.3 0.8; 0.9 0.1]
 	σ² = 5.0
 	R = Diagonal(ones(4) .* σ²)
@@ -566,10 +566,6 @@ function vb_ppca_k2(y::Matrix{Float64}, em_iter = 100, hp_optim=false; debug=fal
 	# return matrix of factor loadings
 	return exp_np.C
 end
-
-# hyper-optim -> true, K=2 elbo re-create
-#main(2000)
-#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]
