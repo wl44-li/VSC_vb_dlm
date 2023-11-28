@@ -10,7 +10,6 @@ begin
 end
 
 function gen_data(A, C, Q, R, μ_0, Σ_0, T)
-	Random.seed!(10)
 	K = size(A, 1)
 	D = size(C, 1)
 	x = zeros(K, T)
@@ -215,7 +214,7 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=false)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="random", debug=false)
 	P, _ = size(ys)
 	K = length(hpp.γ)
 	hss = missing
@@ -465,7 +464,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 			Σ_0 = Matrix{Float64}(I, k, k)
 			hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim, init="random")
+			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim, init="mle")
 
 			if k == 1
 				plot!(p_elbo_k1, els, label="", ylabel="ELBO", xlabel="Iterations")
@@ -531,11 +530,12 @@ function main(n)
 	println("Ground-truth\nLoading Matrix W:")
 	show(stdout, "text/plain", C_)
 	println("\nIsotropic noise σ²: ", σ²)
+	Random.seed!(10)
 	y, _ = gen_data(zeros(2, 2), C_, Diagonal([1.0, 1.0]), R, zeros(2), Diagonal(ones(2)), n)
 	k_elbo_p4(y, 10, false, verboseOut=false)
 end
 
-main(5000)
+#main(5000)
 
 # for MNIST data
 function vb_ppca_k2(y::Matrix{Float64}, em_iter=100, hp_optim=false; debug=false)

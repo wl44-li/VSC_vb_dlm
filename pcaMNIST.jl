@@ -47,6 +47,7 @@ function compare_0(train_y, train_labels, M)
 end
 
 function plot_number(train_y, train_labels, number, M)
+    # get the image of number = number only
     img_n = train_y[:, :, findall(x -> x == number, train_labels)]
     y_n = hcat([vcat(float.(img_n[:, :, t])...) for t in 1:size(img_n, 3)]...)
 
@@ -124,13 +125,13 @@ On-going PPCA-VB Testing
 """
 
 train_y, train_labels = MNIST(split=:train)[:]
-train_y, train_labels = train_y[:, :, 1:12000], train_labels[1:12000]
+train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
 
 T = size(train_y, 3)
 y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 y = zscore(y, 1)
 
-C = vb_ppca_k2(y, 500, false, debug=false)
+C = vb_ppca_k2(y, 100, false, debug=false)
 M = svd(C).U
 
 plot_number(train_y, train_labels, 0, M)
@@ -142,10 +143,11 @@ Package usage debug? Unable to set outputdim to 2
 - MLE, EM option not able to run with MNIST PPCA
 """
 
-# mle = MultivariateStats.fit(PPCA, y; mean=0, maxoutdim=2)
-# M_mle = projection(mle)
-# plot_number(train_y, train_labels, 0, M_mle)
-# plot_number(train_y, train_labels, 1, M_mle)
+mle = MultivariateStats.fit(PPCA, y; mean=0, maxoutdim=2)
+M_mle = projection(mle)
+
+plot_number(train_y, train_labels, 0, M_mle)
+plot_number(train_y, train_labels, 1, M_mle)
 
 # size(y)
-# M_em = MultivariateStats.fit(PPCA, y; mean=0, method=(:em), maxoutdim=2)
+M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)

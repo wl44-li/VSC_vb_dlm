@@ -26,32 +26,6 @@ function gen_data(A, C, Q, R, μ_0, T)
 end
 
 """
-Primiary testing shows poor convergence results in 3 hours, T=500, trivial test
-"""
-@model function ppca_Turing(y, K, a, b, γ)
-    P, T = size(y)
-
-    # Validate that P > 1 for PPCA to be meaningful
-    @assert P > 1 "PPCA requires P > 1 (for each observation instance)."
-
-    # Priors
-    τ ~ Gamma(a, b)
-    R = diagm(ones(P) .* (1/τ))
-
-    # Priors for the loading matrix C using a multivariate normal distribution
-    C ~ filldist(MvNormal(zeros(K), 1/(τ * γ) * I), P)
-
-	#println("C ", size(C))
-    # Priors for the latent variables x using a multivariate normal distribution
-    x ~ filldist(MvNormal(zeros(K), I), T)
-	#println("x ", size(x))
-
-    for t in 1:T
-        y[:, t] ~ MvNormal(C'*x[:, t], R)
-    end
-end
-
-"""
 Corrected model, NUTS (~ 1 hr), HMC (~ 20 mins), iteration 5000
 NUTS (~ ), HMC (~ 10 mins), iteration 3000
 """
@@ -135,6 +109,9 @@ function test_hmc()
     return hmc_chain
 end
 
+"""
+Test with K = 2, P = 3? and compare with VB PPCA
+"""
 hmc_chain = test_hmc()
 
 nuts_chain = test_nuts()

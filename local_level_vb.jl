@@ -469,9 +469,21 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	if init == "gibbs"
 		println("--- Using Gibbs 1-step initilaization ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
-		r_init, q_init = sr[1], sq[1]
+		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 
+		if debug
+			println("Q_init: ", q_init)
+			println("R_init: ", r_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
+	end
+
+	if init == "gibbs_conver"
+		println("--- Using Gibbs Convergence initilaization ---")
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1500, 0, 1)
+		r_init, q_init = sr[end], sq[end]
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 		if debug
 			println("Q_init: ", q_init)
 			println("R_init: ", r_init)
@@ -541,7 +553,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	return 1/E_τ_r, 1/E_τ_q, el_s, qθ
 end
 
-function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
+function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
 	mcmc_q = histogram(mcmc_s, bins=200, normalize=:pdf, label="MCMC")
 	gamma_dist_q = InverseGamma(a_q, b_q)
 
@@ -549,6 +561,11 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
 	ci_upper = quantile(gamma_dist_q, 0.975)
 
 	x = range(extrema(mcmc_s)..., length=200) 
+
+	if out_range_vi
+		x = range(0, 50.0, length=500) 
+	end
+
 	pdf_values = pdf.(gamma_dist_q, x)
 	τ_ = plot!(mcmc_q, x, pdf_values, label="VI", lw=2, xlabel="Var", ylabel="Density")
 	
@@ -562,7 +579,7 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param = nothing)
 	return τ_
 end
 
-function plot_CI_ll(μ_s, σ_s2, x_true = nothing, max_T = 30)
+function plot_CI_ll(μ_s, σ_s2, x_true=nothing, max_T=30)
 	# μ_s :: vector of normal mean
 	# σ_s2 :: vector of corresponding variance
 	μ_s = μ_s[1:max_T]
@@ -586,7 +603,7 @@ function plot_CI_ll(μ_s, σ_s2, x_true = nothing, max_T = 30)
 	return p
 end
 
-function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
+function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 
 	"""
 	*** Prior choice and initilisation of VB
@@ -624,7 +641,7 @@ function test_vb_ll(y, x_true = nothing, hyperoptim = false; show_plot = false)
 	return μs_s, x_std, q_rq, els
 end
 
-function test_MLE(y, x_true = nothing)
+function test_MLE(y, x_true=nothing)
 	model = StateSpaceModels.LocalLevel(y)
 	StateSpaceModels.fit!(model)
 	print_results(model)
@@ -645,79 +662,148 @@ function test_MLE(y, x_true = nothing)
 	end
 end
 
+
 function test_Nile_ffbs()
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
-	# R = 15099.8
-	# Q = 1468.4
-	# T = length(y)
+	R = 15099.8
+	Q = 1468.4
+	T = length(y)
 	Random.seed!(10)
 
-	# Xs = zeros(T, 1000)
-	# for iter in 1:1000
-	# 	# DLM with R set c_0 to 1e7
-	# 	xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
-	# 	Xs[:, iter] = xs[2:end]
-	# end
+	Xs = zeros(T, 1000)
+	for iter in 1:1000
+		# DLM with R set c_0 to 1e7
+		xs = sample_x_ffbs(y, 1.0, 1.0, R, Q, 0.0, 1e7)
+		Xs[:, iter] = xs[2:end]
+	end
 
 	# FFBS agrees with DLM with R!
-	#x_std = std(Xs, dims=2)[:]
-	#p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
-	#display(p)
-
-	_, _, s_r, s_q = test_gibbs_ll(y, nothing, 1500, 0, 1)
-	p_s = scatter(s_r, s_q, label="", xlabel="r", ylabel="q")
-	display(p_s)
-
-	kde_rq = kde((s_r, s_q), npoints=(256, 256))
-	p = contour(kde_rq.x, kde_rq.y, kde_rq.density, 
-				title = "Joint KDE of r and q", xlabel = "r", ylabel = "q")
-
-	#xlims!(p, 0.0, 2.5e4)
-	#ylims!(p, 0.0, 4e3)
+	x_std = std(Xs, dims=2)[:]
+	p = plot(x_std, title="Nile FFBS x std, T=$T", label="")
 	display(p)
 end
 
 #test_Nile_ffbs()
 
-function test_nile()
+function test_nile(n=10)
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
 
-	test_MLE(y)
+	# test_MLE(y)
 	p_elbo = plot()
 	p_obs_r = plot()
 	p_sys_q = plot()
 
-	for _ in 1:20
-		_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 30000, 0, 10)
-		_, _, q_rq, els = test_vb_ll(y)
+	final_elbo = zeros(n)
 
+	r_chainss = []
+	q_chainss = []
+	q_rqss = []
+
+	for i in 1:n
+		#_, _, _, _, r_chain, q_chain = test_gibbs_ll(y, nothing, 1500, 0, 1)
+		#_, _, q_rq, els = test_vb_ll(y, nothing, false)
+
+		@time _, s_q, s_r = gibbs_ll(y, 1.0, 1.0, 1500, 0, 1)
+		q_chain = Chains(reshape(s_q, 1500, 1))
+		r_chain = Chains(reshape(s_r, 1500, 1))
+
+		push!(r_chainss, s_r)
+		push!(q_chainss, s_q)
+
+		hpp_ll = Priors_ll(2, 5e-6, 2, 5e-6, 0.0, 1e7)
+		@time _, _, els, q_rq = vb_ll_c(y, hpp_ll, false, 500, 1e-4, init="gibbs_conver")
+		push!(q_rqss, q_rq)
+
+		final_elbo[i] = els[end]
 		density!(p_obs_r, r_chain)
 		density!(p_sys_q, q_chain)
 
 		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
-		x = range(0, 2000, length=500) 
-		pdf_values = pdf.(gamma_dist_q, x)
-		plot!(p_sys_q, x, pdf_values, label="", lw=1, linestyle=:dash, xlabel="Sys q", ylabel="Density", title="q")
-		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
-		x = range(10000, 30000, length=500) 
-		pdf_values = pdf.(gamma_dist_r, x)
-		plot!(p_obs_r, x, pdf_values, label="", lw=1, linestyle=:dash, xlabel="Obs r", ylabel="Density", title="r")
+		ys = range(0, 1500, length=500) 
+		pdf_values_q = pdf.(gamma_dist_q, ys)
+		plot!(p_sys_q, ys, pdf_values_q, label="", lw=0.5, linestyle=:dash, xlabel="Sys Q", ylabel="Density", title="Q")
 
-		plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")
+		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
+		xs = range(10000, 30000, length=500) 
+		pdf_values_r = pdf.(gamma_dist_r, xs)
+		plot!(p_obs_r, xs, pdf_values_r, label="", lw=0.5, linestyle=:dash, xlabel="Obs R", ylabel="Density", title="R")
+		plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")	
 	end
 
 	display(p_elbo)
-	xlims!(p_sys_q, 0, 2000)
+	xlims!(p_sys_q, 0, 1500)
 	display(p_sys_q)
 	xlims!(p_sys_q, 10000, 30000)
 	display(p_obs_r)
+
+	#println(final_elbo)
+
+	index = argmax(final_elbo)
+	p_MCMC = marginalkde(r_chainss[index], q_chainss[index])
+	gamma_dist_q = InverseGamma(q_rqss[index].α_q_p, q_rqss[index].β_q_p)
+	println("q(Q) mean: ", mean(gamma_dist_q))
+	ys = range(0, 1500, length=500) 
+
+	gamma_dist_r = InverseGamma(q_rqss[index].α_r_p, q_rqss[index].β_r_p)
+	println("q(R) mean: ", mean(gamma_dist_r))
+	xs = range(10000, 30000, length=500) 
+	plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour, subplot=2)
+	display(p_MCMC)
+
+
+	index = argmin(final_elbo)
+	p_MCMC_lop = marginalkde(r_chainss[index], q_chainss[index])
+	gamma_dist_q = InverseGamma(q_rqss[index].α_q_p, q_rqss[index].β_q_p)
+	println("q(Q) local optim mean: ", mean(gamma_dist_q))
+	ys = range(0, 1500, length=500) 
+
+	gamma_dist_r = InverseGamma(q_rqss[index].α_r_p, q_rqss[index].β_r_p)
+	println("q(R) local optim mean: ", mean(gamma_dist_r))
+	xs = range(10000, 30000, length=500) 
+	plot!(p_MCMC_lop, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour, subplot=2)
+	display(p_MCMC_lop)
 end
 
-#test_nile()
+"""
+Multiple local optima of VB discovered
+- lead to different KDE marginal plot of Q, R
+- investigate more on init settings
+- hyper-param update can make it more independent of init ?
+"""
+test_nile(10)
+
+function nile_kde()
+	y = get_Nile()
+	y = vec(y)
+	y = Float64.(y)
+
+	"""
+	Investigate different end elbo with different init random seeds
+	"""
+	Random.seed!(123)
+	_, _, s_r, s_q, _, _ = test_gibbs_ll(y, nothing, 1500, 0, 1)
+	p_MCMC = marginalkde(s_r, s_q)
+	p_MCMC = scatter!(p_MCMC, s_r, s_q, label="", xlabel="R", ms=1, alpha=0.2, ylabel="Q", subplot=2)
+
+	#_, _, q_rq, _ = test_vb_ll(y)
+	hpp_ll = Priors_ll(2, 1e-5, 2, 1e-5, 0.0, 1e7)
+	@time _, _, els, q_rq = vb_ll_c(y, hpp_ll, false, 500, 1e-6, init="gibbs")
+	p_elbo = plot(els, label="", ylabel="ELBO", xlabel="Iterations")	
+	display(p_elbo)
+	gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
+	ys = range(0, 2000, length=500) 
+
+	gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
+	xs = range(10000, 30000, length=500) 
+	plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour, subplot=2)
+	display(p_MCMC)
+end
+
+#nile_kde()
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -757,21 +843,22 @@ end
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
-	R = 10000.0
-	Q = 1000.0
+	R = 100.0
+	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
-	vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true, show_plot = true)
-
+	#vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true, show_plot = true)
+	vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true)
 	"""
 	Choice of Gibbs, NUTS, HMC
 	"""
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
-		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1, show_plot=true)
+		#mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1, show_plot=true)
+		mcmc_x_m, mcmc_x_std, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1)
 	end
 
 	if sampler == "hmc" #turing
@@ -782,11 +869,11 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 		mcmc_x_m, mcmc_x_std, rs, qs = test_nuts(y)
 	end
 
-	kde_result = kde((rs, qs))
-	p = contour(kde_result.x, kde_result.y, kde_result.density, 
-				title = "Joint KDE of r and q", xlabel = "r", ylabel = "q")
+	# kde_result = kde((rs, qs))
+	# p = contour(kde_result.x, kde_result.y, kde_result.density, 
+	# 			title = "Joint KDE of r and q", xlabel = "r", ylabel = "q")
 
-	display(p)
+	# display(p)
 
 	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q)
 	display(plot_r)
@@ -804,6 +891,46 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 end
 
 #main_graph(10, 500, "gibbs")
+
+
+function test_hyper_update(update=true)
+	R = 100.0
+	Q = 10.0
+	println("Ground-truth r = $R, q = $Q")
+	Random.seed!(10)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 500)
+
+	# ill-conditioned hyper-prior
+	hpp_ll = Priors_ll(0.1, 500, 0.1, 500, 0.0, 1e7)
+
+	println("\n--- VBEM ---")
+	println("\nHyperparam optimisation: $update")
+	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, update, init="gibbs")
+	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+	μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
+	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
+
+	mcmc_x_m, _, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1)
+
+	if update
+		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q)
+	else
+		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q, out_range_vi=true)
+		xlims!(plot_q, 0, 45.0)
+	end
+
+	display(plot_r)
+	display(plot_q)
+
+	p = compare_mcmc_vi(mcmc_x_m, μs_s[2:end])
+	title!(p, "Latent X inference mean")
+	xlabel!(p, "MCMC($sampler)")
+	display(p)
+end
+
+#test_hyper_update(false)
+
+#test_hyper_update(true)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
