@@ -8,7 +8,7 @@ begin
     using DataFrames
 end
 
-function gen_data(A, C, Q, R, μ_0, T)
+function gen_data_ppca(A, C, Q, R, T)
 	# re-producibility
 	Random.seed!(10)
 
@@ -50,14 +50,14 @@ NUTS (~ ), HMC (~ 10 mins), iteration 3000
     end
 end
 
-function nuts_ppca_alt(y, mcmc=3000, burn_in=1000)
-    model = ppca_alt(y, 1)
+function nuts_ppca_alt(y, K, mcmc=3000, burn_in=1000)
+    model = ppca_alt(y, K)
     chain = Turing.sample(model, NUTS(), mcmc)
     return chain[burn_in+1:end]
 end
 
-function hmc_ppca(y, mcmc=3000, burn_in=1000)
-    model = ppca_alt(y, 1)
+function hmc_ppca(y, K, mcmc=3000, burn_in=1000)
+    model = ppca_alt(y, K)
     chain = Turing.sample(model, HMC(0.05, 5), mcmc)
     return chain[burn_in+1:end]
 end
@@ -66,9 +66,9 @@ function test_nuts()
     T = 500
     C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([1.0, 1.0])
-    y, _ = gen_data([0.0], C_d2k1, [1.0], R_2, 0.0, T)
+    y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, T)
 
-    nuts_chain = nuts_ppca_alt(y)
+    nuts_chain = nuts_ppca_alt(y, 1)
 
     τs = nuts_chain[:τ]
     p_τ = plot(τs, label = "NUTS τ")
@@ -90,9 +90,9 @@ function test_hmc()
     T = 500
     C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([1.0, 1.0])
-    y, _ = gen_data([0.0], C_d2k1, [1.0], R_2, 0.0, T)
+    y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, T)
 
-    hmc_chain = hmc_ppca(y)
+    hmc_chain = hmc_ppca(y, 1)
 
     τs = hmc_chain[:τ]
     p_τ = plot(τs, label = "HMC τ")
@@ -109,9 +109,35 @@ function test_hmc()
     return hmc_chain
 end
 
-"""
-Test with K = 2, P = 3? and compare with VB PPCA
-"""
-hmc_chain = test_hmc()
+#hmc_chain_1 = test_hmc()
 
-nuts_chain = test_nuts()
+#nuts_chain_1 = test_nuts()
+
+# """
+# Test with K = 2, P = 3? and compare with VB PPCA
+# """
+
+# function test_hmc_p3()
+#     T = 500
+# 	C_d3k2 = [1.0 0.0; 0.2 1.0; 0.9 0.1] 
+#     R_3 = Diagonal([1.0, 1.0, 1.0])
+#     y, _ = gen_data(zeros(2, 2), C_d3k2, Diagonal([1.0, 1.0]), R_3, zeros(2), T)
+
+#     hmc_chain = hmc_ppca(y, 2)
+
+#     τs = hmc_chain[:τ]
+#     p_τ = plot(τs, label = "HMC τ")
+#     display(p_τ)
+#     p_t = density(τs, label = "τ")
+#     display(p_t)
+
+#     # c1s, c2s = hmc_chain[Symbol("C[1,1]")].data, hmc_chain[Symbol("C[1,2]")].data
+
+#     # p1 = density(c1s, label = "C[1, 1]")
+#     # display(p1)
+#     # p2 = density(c2s, label = "C[2, 1]")
+#     # display(p2)
+#     return hmc_chain
+# end
+
+# hmc_chain_2 = test_hmc_p3()
