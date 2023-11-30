@@ -551,25 +551,28 @@ function gen_plots()
 	xs = range(0.8, 1.2, length=100)
 	pdf_values = pdf.(gamma_dist_r, xs)
 	plot!(p_t, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	xlabel!(p1, "σ²")
 	display(p_t)
 
 	c1s, c2s = hmc_chain_k1[Symbol("C[1,1]")].data, hmc_chain_k1[Symbol("C[1,2]")].data
-	p1 = density(c1s, label = "C[1, 1]")
+	p1 = density(c1s, label = "MCMC")
 	norm_c_1 = Normal(abs.(qθ_k1.μ_C[1])[1], sqrt.(qθ_k1.Σ_C)[1])
 	xs = range(0.8, 1.3, length=100)
 	pdf_values = pdf.(norm_c_1, xs)
 	plot!(p1, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	xlabel!(p1, "C[1, 1]")
 	display(p1)
 
-	p2 = density(c2s, label = "C[2, 1]")
+	p2 = density(c2s, label = "MCMC")
 	norm_c_2 = Normal(abs.(qθ_k1.μ_C[2])[1], sqrt.(qθ_k1.Σ_C)[1])
 	xs = range(0.3, 0.8, length=100)
 	pdf_values = pdf.(norm_c_2, xs)
 	plot!(p2, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	xlabel!(p1, "C[2, 1]")
 	display(p2)
 end
 
-#gen_plots()
+gen_plots()
 
 function main(n)
 	# P = 4, K = 2 truth
