@@ -391,7 +391,7 @@ function update_ab(hpp::Priors_ll, qθ)
 	a_r = hpp.α_r
 	a_q = hpp.α_q
 	
-    for _ in 1:10
+    for _ in 1:5
         ψ_a = digamma(a_r)
         ψ_a_p = trigamma(a_r)
         a_new = a_r * exp(-(ψ_a - log(a_r) + log(d_r) - c_r) / (a_r * ψ_a_p - 1))
@@ -403,7 +403,7 @@ function update_ab(hpp::Priors_ll, qθ)
     end
     b_r = a_r/d_r
 
-	for _ in 1:10
+	for _ in 1:5
 		ψ_a_q = digamma(a_q)
         ψ_a_q_p = trigamma(a_q)
         a_new_q= a_q * exp(-(ψ_a_q - log(a_q) + log(d_q) - c_q) / (a_q * ψ_a_q_p - 1))
@@ -433,7 +433,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	hss, qθ = missing, missing
 
 	if init == "mle"
-		println("--- Using MLE initilaization ---")
+		println("\t--- Using MLE initilaization ---")
 		model = StateSpaceModels.LocalLevel(y)
 		StateSpaceModels.fit!(model)	
 		results = model.results
@@ -465,7 +465,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	end
 
 	if init == "gibbs"
-		println("--- Using Gibbs 1-step initilaization ---")
+		println("\t--- Using Gibbs 1-step initilaization ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
@@ -478,7 +478,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	end
 
 	if init == "gibbs_conver"
-		println("--- Using Gibbs Convergence initilaization ---")
+		println("\t--- Using Gibbs Convergence initilaization ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1500, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
@@ -504,7 +504,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	end
 
 	if init == "fixed"
-		println("--- Fixed Start ---")
+		println("\t--- Warning: Fixed Init (Debugging Purpose Only) ---")
 		hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 	end
 
@@ -529,7 +529,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 		end
 
 		if abs(elbo - elbo_prev) < tol
-			println("Stopped at iteration: $i")
+			println("\tStopped at iteration: $i")
 			el_s = el_s[1:i]
             break
 		end
@@ -545,7 +545,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
         elbo_prev = elbo
 
 		if (i == max_iter)
-			println("Warning: VB have not necessarily converged at $max_iter iterations")
+			println("\tWarning: VB have not necessarily converged at $max_iter iterations")
 		end
 	end
 
@@ -554,7 +554,7 @@ end
 
 function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
 	#mcmc_q = histogram(mcmc_s, bins=200, normalize=:pdf, label="MCMC")
-	mcmc_q = density(mcmc_s, label="MCMC", linewidth=2)
+	mcmc_q = density(mcmc_s, label="MCMC", lw=2)
 	gamma_dist_q = InverseGamma(a_q, b_q)
 
 	ci_lower = quantile(gamma_dist_q, 0.025)
@@ -573,7 +573,7 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
 	vspan!([ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
 
 	if true_param !== nothing
-		vline!(τ_, [true_param], label="ground_truth", linestyle=:dash, linewidth=2)
+		vline!(τ_, [true_param], label="ground_truth", ls=:dash, lw=2)
 	end
 
 	return τ_
@@ -604,10 +604,6 @@ function plot_CI_ll(μ_s, σ_s2, x_true=nothing, max_T=30)
 end
 
 function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
-
-	"""
-	*** Prior choice and initilisation of VB
-	"""
 	hpp_ll = Priors_ll(2, 1e-4, 2, 1e-4, 0.0, 1e7)
 
 	println("\n--- VBEM ---")
@@ -618,8 +614,8 @@ function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	x_std = sqrt.(σs_s)
 
-	println("\nVB q(r) mode: ", r)
-	println("VB q(q) mode: ", q)
+	println("\nVB q(q) mode: ", q)
+	println("VB q(r) mode: ", r)
 	if x_true !== nothing
 		println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
 	end
@@ -824,15 +820,15 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, label="MCMC", color=:red, alpha=0.5)
-	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:green, alpha=0.5)
+	p_mcmc = scatter(mcmc, vi, label="", color=:red, ms=2, alpha=0.5)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="", ylabel = "VI", ms=2, color=:green, alpha=0.5)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
 	max_val = max(maximum(mcmc), maximum(vi))
 
 	# Plot the y=x line
-	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:blue, linewidth=2)
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], ls=:dash, label = "", color=:blue, lw=2)
 
 	return p_vi
 end
@@ -840,18 +836,21 @@ end
 function main(max_T)
 	println("Running experiments for local level model:\n")
 	println("T = $max_T")
-	R = 50.0
-	Q = 100.0
+	R = 0.2
+	Q = 1.0
 	println("Ground-truth r = $R, q = $Q")
 
-	#seeds = [88, 145, 105, 104, 134]
-	seeds = [103, 133, 100, 143, 111]
+	seeds = [88, 145, 105, 104, 134]
+	#seeds = [103, 133, 100, 143, 111]
 	for sd in seeds
 		println("\n----- BEGIN Run seed: $sd -----\n")
 		Random.seed!(sd)
 		y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
-		test_gibbs_ll(y, x_true, 10000, 5000, 1)
+		test_MLE(y, x_true)
+		test_gibbs_ll(y, x_true, 15000, 5000, 1)
 		test_vb_ll(y, x_true)
+		println("-- VB with Hyper-param update--")
+		test_vb_ll(y, x_true, true)
 	end
 end
 
@@ -865,7 +864,9 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
 	#vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true, show_plot = true)
-	vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true)
+	vb_x_m, vb_x_std, q_rq, els = test_vb_ll(y, x_true)
+	p_els = plot(els, label="ElBO")
+	display(p_els)
 	"""
 	Choice of Gibbs, NUTS, HMC
 	"""
@@ -902,56 +903,88 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p_MCMC)
 
 	p = compare_mcmc_vi(mcmc_x_m, vb_x_m[2:end])
-	title!(p, "Latent X inference mean")
-	xlabel!(p, "MCMC($sampler)")
+	title!(p, "Latent X means")
+	xlabel!(p, "MCMC (ground-truth)")
 	display(p)
 
 	p2 = compare_mcmc_vi(mcmc_x_std, vb_x_std[2:end])
-	title!(p2, "Latent X std")
-	xlabel!(p2, "MCMC($sampler)")
+	title!(p2, "Latent X stds")
+	xlabel!(p2, "MCMC (ground-truth)")
 	display(p2)
 end
 
-main_graph(10, 500, "gibbs")
+#main_graph(10, 500, "gibbs")
 
 function test_hyper_update(update=true)
 	R = 100.0
 	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
-	Random.seed!(10)
-	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 500)
+	Random.seed!(123)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
 
 	# ill-conditioned hyper-prior
-	hpp_ll = Priors_ll(0.1, 500, 0.1, 500, 0.0, 1e7)
+	hpp_ll = Priors_ll(0.1, 600, 0.1, 600, 0.0, 1e7)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $update")
-	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, update, init="gibbs")
+	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, update, 500, 1e-4, init="gibbs_conver")
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
+	
+	println("final elbo : ", els[end])
+	# p_els = plot(els, label="elbo")
+	# display(p_els)
 
 	mcmc_x_m, _, rs, qs = test_gibbs_ll(y, x_true, 10000, 5000, 1)
+
+	p_kde = marginalkde(rs, qs, color=:blue, alpha=0.7)
+	p_MCMC = plot(p_kde[2], xlabel="R", ylabel="Q")
 
 	if update
 		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q)
 	else
 		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q, out_range_vi=true)
-		xlims!(plot_q, 0, 45.0)
 	end
-
+	xlims!(plot_q, 6.0, 24.0)
+	xlims!(plot_r, 85.0, 115.0)
+	xlabel!(plot_q, "Q")
+	xlabel!(plot_r, "R")
 	display(plot_r)
 	display(plot_q)
+	
+	if update
+		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
+		xs = range(extrema(rs)..., length=200) 
+		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
+		ys = range(extrema(qs)..., length=200) 
+		plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
+		xlims!(p_MCMC, 85.0, 108.0)
+		ylims!(p_MCMC, 6.0, 19.0)
+		display(p_MCMC)
+	else
+		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
+		xs = range(80.0, 110.0, length=200) 
+		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
+		ys = range(0.0, 30.0, length=200) 
+		plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
+		xlims!(p_MCMC, 85.0, 108.0)
+		ylims!(p_MCMC, 6.0, 19.0)
+		display(p_MCMC)
+	end
 
 	p = compare_mcmc_vi(mcmc_x_m, μs_s[2:end])
-	title!(p, "Latent X inference mean")
-	xlabel!(p, "MCMC($sampler)")
+	title!(p, "Latent X means")
+	xlabel!(p, "MCMC (ground-truth)")
+
+	#better view on the difference
+	xlims!(p, 0.0, 50.0)
+	ylims!(p, 0.0, 50.0)
 	display(p)
 end
 
-#test_hyper_update(false)
-
-#test_hyper_update(true)
+test_hyper_update(false)
+test_hyper_update(true)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -964,8 +997,6 @@ function out_txt(n)
 		end
 	end
 end
-
-#out_txt(500)
 
 # PLUTO_PROJECT_TOML_CONTENTS = """
 # [deps]

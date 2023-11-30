@@ -533,24 +533,24 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_pl
 
 	if show_plot
 		#R_chain = Chains(reshape(Rs_samples, n_samples, 1))
-		p_r = density(R_chain[:, 1, :], label="MCMC R")
+		p_r = density(R_chain[:, 1, :], label="MCMC", lw=2)
 		#title!(p_r, "MCMC R")
 		#display(p_r)
 
-		p_r_his = histogram(R_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC R")
+		p_r_his = histogram(R_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC")
 		#display(p_r_his)
 
 		#Q_chain = Chains(reshape(1 ./ Qs_samples, n_samples, 4))
-		p1 = density(Q_chain[:, 1, :], label="MCMC Q[1, 1]")
+		p1 = density(Q_chain[:, 1, :], label="MCMC", lw=2)
 		#display(p1)
 
-		p1_his = histogram(Q_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC Q[1, 1]")
+		#p1_his = histogram(Q_chain[:, 1, :], bins=200, normalize=:pdf, label="MCMC")
 		#display(p1_his)
 
-		p4 = density(Q_chain[:, end, :], label="MCMC Q[2, 2]")
+		p4 = density(Q_chain[:, end, :], label="MCMC", lw=2)
 		#display(p4)
 
-		p4_his = histogram(Q_chain[:, end, :], bins=200, normalize=:pdf, label="MCMC Q[2, 2]")
+		#p4_his = histogram(Q_chain[:, end, :], bins=200, normalize=:pdf, label="MCMC Q[2, 2]")
 		#display(p4_his)
 
 		#ps = plot_x_itvl(xs_m, xs_std, x_true, 20)
@@ -584,16 +584,16 @@ function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
     
-	p_mcmc = scatter(mcmc, vi, label="MCMC", xlabel = "MCMC", color=:yellow, alpha=0.3)
+	p_mcmc = scatter(mcmc, vi, label="", xlabel = "MCMC (ground-truth)", color=:yellow, ms=2, alpha=0.5)
 
-	p_vi = scatter!(p_mcmc, mcmc, vi, label="VI", ylabel = "VI", color=:blue, alpha=0.3)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="", ylabel = "VI", color=:blue, ms=2, alpha=0.5)
 
 	# Determine the range for the y=x line
 	min_val = min(minimum(mcmc), minimum(vi))
 	max_val = max(maximum(mcmc), maximum(vi))
 
 	# Plot the y=x line
-	plot!(p_vi, [min_val, max_val], [min_val, max_val], linestyle=:dash, label = "", color=:red, linewidth=2)
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], ls=:dash, label = "", color=:red, ms=2, lw=2)
 
 	return p_vi
 end
@@ -637,9 +637,9 @@ function plot_mcmc_vi_gamma(a_q, b_q, p_mcmc, true_param=nothing, x_lmin=0.0, x_
 
     x = range(x_min, x_max, length=200)
     pdf_values = pdf.(gamma_dist_q, x)
-    τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=1, xlabel="", ylabel="Density")
+    τ_q = plot!(p_mcmc, x, pdf_values, label="VI", lw=2, xlabel="", ylabel="Density")
 	
-	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, color=:red, label="95% CI", lw=2)
+	plot!(τ_q, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, ms=2, color=:red, label="95% CI", lw=2)
 	vspan!(τ_q, [ci_lower, ci_upper], fill=:red, alpha=0.2, label=nothing, xlims=(x_min, x_max))
     
 	if true_param !== nothing
@@ -673,32 +673,36 @@ function main_graph(n, sd)
 	y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), n)
 
 	xm_vb, std_vb, Q_gam = comp_vb_mle(y, x_true)
-
 	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 15000, 10000, 1, show_plot=true)
 
 	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 30.0)
+	xlabel!(plot_r, "R")
 	display(plot_r)
 
 	plot_q1 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[1], p_q1, Q[1, 1], 0.0, 40.0)
+	xlims!(plot_q1, 5.0, 35.0)
+	xlabel!(plot_q1, "Q[1, 1]")
 	display(plot_q1)
 
 	plot_q2 = plot_mcmc_vi_gamma(Q_gam.α, (Q_gam.β)[2], p_q2, Q[2, 2], 0.0, 10.0)
+	xlims!(plot_q2, 2.0, 8.0)
+	xlabel!(plot_q2, "Q[2, 2]")
 	display(plot_q2)
 
 	p = compare_mcmc_vi(xm_mcmc[1, :], xm_vb[1, 2:end])
-	title!(p, "Latent x mean, x_1")
+	title!(p, "Latent X[1,:] means")
 	display(p)
 
 	p_v = compare_mcmc_vi(std_mcmc[1, :], std_vb[1, 2:end])
-	title!(p_v, "Latent x std, x_1")
+	title!(p_v, "Latent X[1,:] stds")
 	display(p_v)
 
 	p2 = compare_mcmc_vi(xm_mcmc[2, :], xm_vb[2, 2:end])
-	title!(p2, "Latent x mean, x_2")
+	title!(p2, "Latent X[2,:] means")
 	display(p2)
 
 	p_2v = compare_mcmc_vi(std_mcmc[2, :], std_vb[2, 2:end])
-	title!(p_2v, "Latent x std, x_2")
+	title!(p_2v, "Latent X[2,:] stds")
 	display(p_2v)
 	println("----- END Run seed: $sd -----\n")
 end
