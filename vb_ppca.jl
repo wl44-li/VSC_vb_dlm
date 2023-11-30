@@ -214,7 +214,7 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-4; init="random", debug=false)
+function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-5; init="random", debug=false)
 	P, _ = size(ys)
 	K = length(hpp.γ)
 	hss = missing
@@ -522,13 +522,21 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
     display(p2)
 end
 
-function comp_mcmc_vb()
+function comp_mcmc_vb(mcmc_mode="hmc")
 	T = 500
     C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([1.0, 1.0])
     y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, T)
 
-    hmc_chain = hmc_ppca(y, 1)
+	mcmc_chain = missing
+	if mcmc_mode == "hmc"
+		mcmc_chain = hmc_ppca(y, 1)
+	end
+
+	if mcmc_mode == "nuts"
+		mcmc_chain = nuts_ppca_alt(y, 1)
+	end
+
 	K = 1
 	γ = ones(K)
 	a = 2
@@ -539,23 +547,25 @@ function comp_mcmc_vb()
 
 	_, _, _, qθ = vb_ppca_c(y, hpp, false, init="random")
 
-	return hmc_chain, qθ
+	return mcmc_chain, qθ
 end
 
-function gen_plots()
-	hmc_chain_k1, qθ_k1 = comp_mcmc_vb()
+function gen_plots(mode="hmc")
+	#mcmc_chain_k1, qθ_k1 = comp_mcmc_vb()
 
-	τs = hmc_chain_k1[:τ].data
-	p_t = density(τs, label = "MCMC")
+	mcmc_chain_k1, qθ_k1 = comp_mcmc_vb(mode)
+
+	τs = mcmc_chain_k1[:τ].data
+	p_t = density(τs, label = "MCMC($mode)")
 	gamma_dist_r = InverseGamma(qθ_k1.a_s, qθ_k1.b_s)
 	xs = range(0.8, 1.2, length=100)
 	pdf_values = pdf.(gamma_dist_r, xs)
 	plot!(p_t, xs, pdf_values, label="VI", lw=2, ylabel="Density")
-	xlabel!(p1, "σ²")
+	xlabel!(p_t, "σ²")
 	display(p_t)
 
-	c1s, c2s = hmc_chain_k1[Symbol("C[1,1]")].data, hmc_chain_k1[Symbol("C[1,2]")].data
-	p1 = density(c1s, label = "MCMC")
+	c1s, c2s = mcmc_chain_k1[Symbol("C[1,1]")].data, mcmc_chain_k1[Symbol("C[1,2]")].data
+	p1 = density(c1s, label = "MCMC($mode)")
 	norm_c_1 = Normal(abs.(qθ_k1.μ_C[1])[1], sqrt.(qθ_k1.Σ_C)[1])
 	xs = range(0.8, 1.3, length=100)
 	pdf_values = pdf.(norm_c_1, xs)
@@ -563,16 +573,18 @@ function gen_plots()
 	xlabel!(p1, "C[1, 1]")
 	display(p1)
 
-	p2 = density(c2s, label = "MCMC")
+	p2 = density(c2s, label = "MCMC($mode)")
 	norm_c_2 = Normal(abs.(qθ_k1.μ_C[2])[1], sqrt.(qθ_k1.Σ_C)[1])
 	xs = range(0.3, 0.8, length=100)
 	pdf_values = pdf.(norm_c_2, xs)
 	plot!(p2, xs, pdf_values, label="VI", lw=2, ylabel="Density")
-	xlabel!(p1, "C[2, 1]")
+	xlabel!(p2, "C[2, 1]")
 	display(p2)
 end
 
-gen_plots()
+#gen_plots()
+gen_plots("nuts")
+
 
 function main(n)
 	# P = 4, K = 2 truth
