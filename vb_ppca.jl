@@ -57,7 +57,7 @@ begin
 	end
 end
 
-function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
+function vb_m(ys, hps::HPP, ss::HSS_PPCA)
 	P, T = size(ys)
 	W_C = ss.W_C
 	S_C = ss.S_C
@@ -95,7 +95,7 @@ function vb_m(ys::Matrix{Float64}, hps::HPP, ss::HSS_PPCA)
 	return Exp_ϕ(Exp_C, Exp_R⁻¹, Exp_CᵀR⁻¹C, Exp_R⁻¹C, Exp_CᵀR⁻¹, exp_log_ρ), γ_n, exp_ρ, exp_log_ρ, Qθ(Σ_C, μ_C, a_s, b_s)
 end
 
-function v_forward(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP)
+function v_forward(ys, exp_np::Exp_ϕ, hpp::HPP)
     _, T = size(ys)
     K = length(hpp.γ)
 
@@ -142,7 +142,7 @@ function log_Z(ys, μs, Σs, exp_np::Exp_ϕ, hpp::HPP)
 	return log_Z
 end
 
-function vb_e(ys::Matrix{Float64}, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
+function vb_e(ys, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
     _, T = size(ys)
 	# forward pass α_t(x_t) suffices as A = 0 matrix
 	ωs, Υs, Σs_ = v_forward(ys, exp_np, hpp)
@@ -187,7 +187,7 @@ function update_ab(hpp::HPP, exp_ρ::Vector{Float64}, exp_log_ρ::Vector{Float64
 	return a, b
 end
 
-function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
+function vb_ppca(ys, hpp::HPP, hpp_learn=false, max_iter=500)
 	D, T = size(ys)
 	K = length(hpp.γ)
 	
@@ -214,7 +214,7 @@ function vb_ppca(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500, tol=1e-5; init="random", debug=false)
+function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init="random", debug=false)
 	P, _ = size(ys)
 	K = length(hpp.γ)
 	hss = missing
@@ -222,10 +222,15 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 
 	if init == "mle"
 		# use MLE esitmate of σ and C to run VBE-step first
+		"""
+		Warning: Work in progress
+		"""
+
+		println("\t--- Using MLE initilaization ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
 		σ²_init = M_mle.σ² .* (1 + randn() * 0.2) 
-		e_C = M_mle.W * (1 + randn() * 0.2) 
+		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.2) 
 
 		R = diagm(ones(P) .* σ²_init)
 		e_R⁻¹ = inv(R)
@@ -246,6 +251,9 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 
 	if init == "em"
 		# use EM esitmate of σ and C to run VBE-step first
+		"""
+			Warning: Work in progress
+		"""
 		M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
 
 		σ²_init = M_em.σ² .* (1 + randn() * 0.2) 
@@ -281,6 +289,7 @@ function vb_ppca_c(ys::Matrix{Float64}, hpp::HPP, hpp_learn=false, max_iter=500,
 	if init == "random"
 		# init R and C, needs more testing
 		#ρ̄ = hpp.a / hpp.b
+		println("\t--- Using Rand initilaization ---")
 		ρ_init = 0.5 / 0.5
 		R = diagm(ones(P) .* ρ_init)
 
@@ -410,7 +419,7 @@ function comp_ppca(max_T = 1000)
 	println("\nlatent x MSE, MAD: ", error_metrics(x_true, ωs))
 	W = exp_np.C
 	WTW = W'*W
-	C = WTW + I*mean(diag(inv(exp_np.R⁻¹)))
+	C = WTW + I*(inv(exp_np.R⁻¹))
 	y_recon = W*inv(WTW)*C*ωs
 	println("y recon MSE, MAD: ", error_metrics(y, y_recon))
 	p = plot(els, title="ELBO progression", label="")
@@ -430,14 +439,6 @@ function out_txt(n)
 		end
 	end
 end
-
-"""
-TO-DO: Compare ELBO for optimal K, 
-convex optimisation? ELBO is generally NON-CONVEX
-VI always reaches the same ELBO with fixed initialisations
-- Consider different random starts
-- MLE result of σ² -> run E-step first
-"""
 
 function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 	elbos_k1 = zeros(n)
@@ -600,12 +601,15 @@ end
 #main(5000)
 
 # for MNIST data
-function vb_ppca_k2(y::Matrix{Float64}, em_iter=100, hp_optim=false; debug=false)
-	# related to row-precision of C
-	# γ = ones(2) .* 1e-6
-	γ = ones(2)
+function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode ="mle")
+	
+	# related to row-precision of C/W
+	γ = ones(2) 
 
-	# related to precision of R
+	# related to precision of σ²
+	# a = 1.1
+	# b = 0.05
+
 	a = 2
 	b = 1e-3
 
@@ -613,17 +617,17 @@ function vb_ppca_k2(y::Matrix{Float64}, em_iter=100, hp_optim=false; debug=false
 	Σ_0 = Matrix{Float64}(I, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init="random")
+	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)
 
 	if debug
-		println("ELBOs: ", els)
+		#println("ELBOs: ", els)
+		println("ELBOs end: ", els[end])
+		p_el = plot(els, label="ElBO")
+		display(p_el)
 	end
 
-	p_el = plot(els, title="PPCA ELBO progression", margin = 5mm)
-	display(p_el)
-
-	# return matrix of factor loadings
-	return exp_np.C
+	# return matrix of factor loadings (W), and isotropic noise (σ²)
+	return exp_np.C, exp_np.R⁻¹[1, 1], els
 end
 
 # PLUTO_PROJECT_TOML_CONTENTS = """

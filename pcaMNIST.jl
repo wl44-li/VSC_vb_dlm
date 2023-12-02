@@ -113,41 +113,104 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     display(p)
 end
 
-#test_MNIST(100, true, "vbem")
-#test_MNIST()
-
-"""
-On-going PPCA-VB Testing
-- check ELBO always increasing
-- prior choices
-- random starts 
-- P = 28 x 28 = 784, K = 2
-"""
-
 train_y, train_labels = MNIST(split=:train)[:]
-train_y, train_labels = train_y[:, :, 1:6000], train_labels[1:6000]
+train_y, train_labels = train_y[:, :, 1:30000], train_labels[1:30000]
 
 T = size(train_y, 3)
 y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
-y = zscore(y, 1)
 
-C = vb_ppca_k2(y, 100, false, debug=false)
-M = svd(C).U
+#println("dimension of Y(obs): ", size(y))
 
-plot_number(train_y, train_labels, 0, M)
-plot_number(train_y, train_labels, 1, M)
+# 1s
+img_1 = train_y[:, :, findall(x -> x == 1, train_labels)]
+y_1s = hcat([vcat(float.(img_1[:, :, t])...) for t in 1:size(img_1, 3)]...)
 
-"""
-Package usage debug? Unable to set outputdim to 2
-- Hence MLE, EM init is not guranteed to work
-- MLE, EM option not able to run with MNIST PPCA
-"""
+#println("dimension of 1s (obs): ", size(y_1s))
 
-mle = MultivariateStats.fit(PPCA, y; mean=0, maxoutdim=2)
-M_mle = projection(mle)
+# pca = MultivariateStats.fit(PCA, y_1s; maxoutdim=2)
+# M_pca = projection(pca)
+# x_1s = M_pca' * y_1s
+# scatter(x_1s[1, :], x_1s[2, :], c=:red, label="Digit 1 (PCA)", ms=0.8, msw=0, xlims=(-7.5, 7.5), ylims=(-7.5, 7.5),
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
 
-plot_number(train_y, train_labels, 0, M_mle)
-plot_number(train_y, train_labels, 1, M_mle)
 
-# size(y)
-M_em = MultivariateStats.fit(PPCA, y; method=(:em), maxoutdim=2)
+# mle = MultivariateStats.fit(PPCA, y_1s; maxoutdim=2)
+# M_mle = projection(mle)
+# x_1s_mle = M_mle' * y_1s
+# scatter(x_1s_mle[1, :], x_1s_mle[2, :], c=:orange, label="Digit 1 (MLE)", ms=0.8, msw=0, xlims=(-7.5, 7.5), ylims=(-7.5, 7.5),
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
+
+
+# M_mle_k2 = svd(mle.W[:, 1:2]).U
+# x_1s_k2 = M_mle_k2' * y_1s
+# scatter(x_1s_k2[1, :], x_1s_k2[2, :], c=:blue, label="Digit 1 (MLE, K2)", ms=0.8, msw=0, xlims=(-7.5, 7.5), ylims=(-7.5, 7.5),
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
+
+y_st = zscore(y_1s, 1)
+C, σ², els = vb_ppca_k2(y_st, 2000, false)
+M_vb = svd(C).U
+x_1s_vb2 = M_vb' * y_st
+scatter(x_1s_vb2[2, :], x_1s_vb2[1, :], c=:black, label="Digit 1 (VB-std)", ms=1.5, msw=0, 
+legend = :topleft, xlabel="PC 1", ylabel="PC 2")                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+
+function test_vb_ppca(y, n=10)
+    plots = []
+    elss = []
+	p_elbo = plot()
+
+    for rep in 1:n
+
+        C, els = missing, missing
+        if rep%2 == 0
+            C, _, els = vb_ppca_k2(y, 2000, false, mode = "mle")
+
+        else
+            C, _, els = vb_ppca_k2(y, 2000, false, mode = "random")
+        end
+        M_vb = svd(C).U
+        x_1s_vb2 = M_vb' * y_st
+
+        push!(plots, scatter(x_1s_vb2[2, :], x_1s_vb2[1, :], c=:black, label="Digit 1 (VB-std)", ms=1.5, msw=0, 
+        legend = :topleft, xlabel="PC 1", ylabel="PC 2"))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+        plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")	
+        push!(elss, els)
+        println("ELBOs end: ", els[end])
+    end
+
+    display(p_elbo)
+
+    return plots, elss
+end
+
+plot_1s, elss = test_vb_ppca(y_st, 20)
+
+# mle_std = MultivariateStats.fit(PPCA, y_st; maxoutdim=2)
+# M_mle_k2 = svd(mle_std.W[:, 1:2]).U
+# x_1s_k2 = M_mle_k2' * y_st
+# scatter(x_1s_k2[1, :], x_1s_k2[2, :].*(-1), c=:blue, label="Digit 1 (MLE, K2 std)", ms=1.5, msw=0,
+# legend = :topleft, xlabel="PC 1", ylabel="PC 2")
+
+
+# Os
+# img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
+# y_0s = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
+# println("dimension of 0s (obs): ", size(y_0s))
+
+# y_st_0 = zscore(y_0s, 1)
+# mle = MultivariateStats.fit(PPCA, y_st_0; maxoutdim=2)
+# M_mle = projection(mle)
+# M_mle_k2 = M_mle[:, 1:2]
+# x_0s_k2 = M_mle_k2' * y_st_0
+# scatter(x_0s_k2[2, :], x_0s_k2[1, :], c=:blue, label="Digit 0 (MLE-std, K2)", ms=0.8, msw=0,
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
+# scatter!(x_1s_k2[2, :], x_1s_k2[1, :], c=:red, label="Digit 1 (MLE-std, K2)", ms=0.8, msw=0,
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
+
+
+# C, σ² = vb_ppca_k2(y_st_0, 500, false, debug=true)
+# M_vb = svd(C).U
+# x_0s_vb2 = M_vb' * y_st_0
+# scatter(x_0s_vb2[1, :], x_0s_vb2[2, :], c=:violet, label="Digit 0 (VB-std)", ms=0.8, msw=0, 
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")
+# scatter!(x_1s_vb2[1, :], x_1s_vb2[2, :], c=:black, label="Digit 1 (VB-std)", ms=0.8, msw=0, 
+# legend = :topright, xlabel="PC 1", ylabel="PC 2")

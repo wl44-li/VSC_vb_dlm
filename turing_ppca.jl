@@ -50,6 +50,24 @@ NUTS (~ ), HMC (~ 10 mins), iteration 3000
     end
 end
 
+# Turing tutorial example
+@model function pPCA_ARD(Y)
+    # Dimensionality of the problem. Y needs to be transposed 
+    T, P = size(Y)
+
+    # latent variable X
+    X ~ filldist(Normal(), P, T)
+
+    # weights/loadings w with Automatic Relevance Determination part
+    α ~ filldist(Gamma(1.0, 1.0), P)
+    W ~ filldist(MvNormal(zeros(P), 1.0 ./ sqrt.(α)), P)
+
+    mu = (W' * X)'
+
+    τ ~ Gamma(1.0, 1.0)
+    return Y ~ arraydist([MvNormal(m, 1.0 / sqrt(τ)) for m in eachcol(mu)])
+end
+
 function nuts_ppca_alt(y, K, mcmc=3000, burn_in=1000)
     model = ppca_alt(y, K)
     chain = Turing.sample(model, NUTS(), mcmc)
