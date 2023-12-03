@@ -226,11 +226,11 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init=
 		Warning: Work in progress
 		"""
 
-		println("\t--- Using MLE initilaization ---")
+		println("\t--- VB PPCA using MLE initilaization ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
-		σ²_init = M_mle.σ² .* (1 + randn() * 0.2) 
-		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.2) 
+		σ²_init = M_mle.σ² .* (1 + randn() * 0.5) 
+		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.5) 
 
 		R = diagm(ones(P) .* σ²_init)
 		e_R⁻¹ = inv(R)
@@ -288,9 +288,10 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init=
 
 	if init == "random"
 		# init R and C, needs more testing
-		#ρ̄ = hpp.a / hpp.b
-		println("\t--- Using Rand initilaization ---")
-		ρ_init = 0.5 / 0.5
+		println("\t--- VB PPCA using random initilaization ---")
+		#ρ_init = 0.5 / 0.5
+		ρ_init = hpp.a / hpp.b
+
 		R = diagm(ones(P) .* ρ_init)
 
 		cs = [rand(MvNormal(zeros(K), (1/ρ_init) * I)) for _ in 1:P]
