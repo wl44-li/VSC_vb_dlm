@@ -98,24 +98,16 @@ end
 function v_forward(ys, exp_np::Exp_ϕ, hpp::HPP)
     _, T = size(ys)
     K = length(hpp.γ)
-
     μs = zeros(K, T)
     Σs = zeros(K, K, T)
-	Σs_ = zeros(K, K, T)
 
-	Σs_[:, :, 1] = hpp.Σ_0
-		
 	# iterate over T, Algorithm 5.1
 	for t in 1:T		
 		Σs[:, :, t] = inv(I + exp_np.CᵀR⁻¹C)
     	μs[:, t] = Σs[:, :, t]*(exp_np.CᵀR⁻¹*ys[:, t])
-
-		if t < T
-			Σs_[:, :, t+1] = Σs[:, :, t]
-		end
 	end
 
-	return μs, Σs, Σs_
+	return μs, Σs
 end
 
 """
@@ -145,7 +137,7 @@ end
 function vb_e(ys, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
     _, T = size(ys)
 	# forward pass α_t(x_t) suffices as A = 0 matrix
-	ωs, Υs, Σs_ = v_forward(ys, exp_np, hpp)
+	ωs, Υs, _ = v_forward(ys, exp_np, hpp)
 	
 	# hidden state sufficient stats 	
 	W_C = sum(Υs[:, :, t] + ωs[:, t] * ωs[:, t]' for t in 1:T)
@@ -229,8 +221,8 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init=
 		println("\t--- VB PPCA using MLE initilaization ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
-		σ²_init = M_mle.σ² .* (1 + randn() * 0.5) 
-		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.5) 
+		σ²_init = M_mle.σ² .* (1 + randn() * 0.3) 
+		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.3) 
 
 		R = diagm(ones(P) .* σ²_init)
 		e_R⁻¹ = inv(R)
@@ -470,7 +462,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 			exp_end, el_end, els = vb_ppca_c(y, hpp, hyper_optim, init="mle")
 
 			if k == 1
-				plot!(p_elbo_k1, els, label="", ylabel="ELBO", xlabel="Iterations")
+				plot!(p_elbo_k1, els, label="", ylabel="ElBO", xlabel="Iterations")
 				elbos_k1[index_1] = el_end
 				index_1+=1
 
@@ -482,7 +474,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 			end
 
 			if k == 2
-				plot!(p_elbo_k2, els, label="", ylabel="ELBO", xlabel="Iterations")
+				plot!(p_elbo_k2, els, label="", ylabel="ElBO", xlabel="Iterations")
 				
 				if verboseOut
 					println("\n--- VBEM k=$k ---\n Loading Matrix W:")
@@ -494,7 +486,7 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 			end
 
 			if k == 3
-				plot!(p_elbo_k3, els, label="", ylabel="ELBO", xlabel="Iterations")
+				plot!(p_elbo_k3, els, label="", ylabel="ElBO", xlabel="Iterations")
 				elbos_k3[index_3] = el_end
 				index_3+=1
 			end
@@ -502,9 +494,9 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 	end
 
 	if verboseOut
-		println("final ELBO of K=1:", elbos_k1)
-		println("final ELBO of K=2:", elbos_k2)
-		println("final ELBO of K=3:", elbos_k3)
+		println("final ElBO of K=1:", elbos_k1)
+		println("final ElBO of K=2:", elbos_k2)
+		println("final ElBO of K=3:", elbos_k3)
 	end
 
 	println("--- FINAL ElBO mean: ---")
@@ -519,8 +511,8 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
 	groups = repeat(["K = 1", "K = 2", "K = 3"], inner = length(elbos_k1))
 	all_elbos = vcat(elbos_k1, elbos_k2, elbos_k3)
 
-	p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ELBO", legend=false)
-	title!(p2, "ELBO Model Selection, K=2")
+	p2 = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
+	title!(p2, "ElBO Model Selection, K=2")
     display(p2)
 end
 
@@ -602,7 +594,7 @@ end
 #main(5000)
 
 # for MNIST data
-function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode ="mle")
+function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
 	
 	# related to row-precision of C/W
 	γ = ones(2) 
