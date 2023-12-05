@@ -323,7 +323,7 @@ function test_vb(y, x_true=nothing, hyperoptim=false; show_plot=false, init="gib
 		# 	sleep(1)
 		# end
 	end
-	return μs_s, stds, Q_gam
+	return μs_s, stds, Q_gam, elbos
 end
 
 function test_mle(y, x_true = nothing)
@@ -650,8 +650,8 @@ end
 
 function comp_vb_mle(y, x_true = nothing, hyperoptim=false)
 	test_mle(y, x_true)
-	xm_vb, std_vb, Q_gam = test_vb(y, x_true, hyperoptim)
-	return xm_vb, std_vb, Q_gam
+	xm_vb, std_vb, Q_gam, els = test_vb(y, x_true, hyperoptim)
+	return xm_vb, std_vb, Q_gam, els
 end
 
 function main_graph(n, sd)
@@ -672,7 +672,10 @@ function main_graph(n, sd)
 	Random.seed!(sd)
 	y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), n)
 
-	xm_vb, std_vb, Q_gam = comp_vb_mle(y, x_true)
+	xm_vb, std_vb, Q_gam, els = comp_vb_mle(y, x_true)
+	plot_elbo = plot(els, label="ElBO")
+	display(plot_elbo)
+
 	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 15000, 10000, 1, show_plot=true)
 
 	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 30.0)
@@ -707,7 +710,7 @@ function main_graph(n, sd)
 	println("----- END Run seed: $sd -----\n")
 end
 
-#main_graph(1000, 123)
+main_graph(1000, 123)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
