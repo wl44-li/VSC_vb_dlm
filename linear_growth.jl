@@ -710,7 +710,7 @@ function main_graph(n, sd)
 	println("----- END Run seed: $sd -----\n")
 end
 
-main_graph(1000, 123)
+#main_graph(1000, 123)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

@@ -103,8 +103,8 @@ function forward_fil(y, A, C, R, Q, m_0, c_0)
         a_s[t] = a_t = A * ms[t]
         rs[t] = r_t = A * cs[t] * A + Q
 
-		f_t = C * a_t #y pred
-		q_t = C * r_t * C + R
+		f_t = C * a_t #y one-step pred mean
+		q_t = C * r_t * C + R #y one-step var
 
         ms[t+1] = a_t + r_t*C*(1/q_t)*(y[t] - f_t)
         cs[t+1] = r_t - r_t*C*(1/q_t)*C*r_t
@@ -167,7 +167,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	q = 1.0
 
 	n_samples = Int.(mcmc/thinning)
-	samples_x = zeros(T, n_samples)
+	samples_x = zeros(T+1, n_samples)
 	samples_q = zeros(n_samples)
 	samples_r = zeros(n_samples)
 	
@@ -175,7 +175,7 @@ function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 		x = sample_x_ffbs(y, a, c, r, q, m_0, c_0)
 		q = sample_q(x, a, α, β)
 		r = sample_r(x, y, c, α, β)
-		x = x[2:end]
+		# x = x[2:end]
 
 		if i > burn_in && mod(i - burn_in, thinning) == 0
 			index = div(i - burn_in, thinning)
@@ -208,7 +208,7 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show
 	x_std = std(s_x, dims=2)[:]
 
 	if x_true !== nothing
-		println("average x sample error " , error_metrics(x_true[2:end], x_m))
+		println("average x sample error " , error_metrics(x_true[2:end], x_m[2:end]))
 	end
 
 	if show_plot
@@ -293,7 +293,7 @@ function vb_m_ll(y, hss::HSS_ll, priors::Priors_ll)
     return E_τ_r, E_τ_q, qθ(α_r_p, β_r_p, α_q_p, β_q_p)
 end
 
-function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
+function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll; y_pred=false)
     T = length(y)
 	
 	#filter state
@@ -309,6 +309,10 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
 
 	log_z = 0.0
 
+	if y_pred
+		f_s = zeros(T)
+		q_s = zeros(T)
+	end
     for t in 1:T
         a_s[t] = a_t = a * μ_f[t]
         rs[t] = r_t = a * σ_f[t] * a + 1/E_τ_q # Q
@@ -317,10 +321,18 @@ function forward_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
 		q_t = c * r_t * c + 1/E_τ_r # R
 		log_z += logpdf(Normal(f_t, sqrt(q_t)), y[t])
 
+		if y_pred
+			f_s[t]= f_t
+			q_s[t]= q_t
+		end
 		# m_t, C_t Kalman Filter
 		μ_f[t+1] = a_t + r_t * c * (1/q_t) * (y[t] - f_t)
 		σ_f[t+1] = r_t - r_t * c * (1/q_t) * c * r_t
     end
+
+	if y_pred
+		return f_s, q_s
+	end
 	
     return μ_f, σ_f, a_s, rs, log_z
 end
@@ -346,7 +358,7 @@ function backward_ll(a, μ_f, σ_f, a_s, rs, E_τ_q)
 end
 
 function vb_e_ll(y, a, c, E_τ_r, E_τ_q, priors::Priors_ll)
-    # Forward pass (filter)
+    # Forward pass (filter), cf. Beal pg70
     μs_f, σs_f, a_s, rs, log_Z = forward_ll(y, a, c, E_τ_r, E_τ_q, priors)
 
     # Backward pass (smoother)
@@ -431,6 +443,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 	E_τ_r, E_τ_q  = missing, missing
 	elbo_prev, el_s = -Inf, zeros(max_iter)
 	hss, qθ = missing, missing
+	avg_log_score = missing
 
 	if init == "mle"
 		println("\t--- Using MLE initilaization ---")
@@ -530,6 +543,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 
 		if abs(elbo - elbo_prev) < tol
 			println("\tStopped at iteration: $i")
+			avg_log_score = log_z / length(y)
 			el_s = el_s[1:i]
             break
 		end
@@ -545,11 +559,12 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
         elbo_prev = elbo
 
 		if (i == max_iter)
+			avg_log_score = log_z / length(y)
 			println("\tWarning: VB have not necessarily converged at $max_iter iterations")
 		end
 	end
 
-	return 1/E_τ_r, 1/E_τ_q, el_s, qθ
+	return 1/E_τ_r, 1/E_τ_q, el_s, qθ, avg_log_score
 end
 
 function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
@@ -608,7 +623,7 @@ function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $hyperoptim")
-	@time r, q, els, q_rq = vb_ll_c(y, hpp_ll, hyperoptim, init="gibbs")
+	@time r, q, els, q_rq, avg_ll = vb_ll_c(y, hpp_ll, hyperoptim, init="gibbs")
 
 	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 	μs_s, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
@@ -634,7 +649,7 @@ function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
-	return μs_s, x_std, q_rq, els
+	return μs_s, x_std, q_rq, els, avg_ll
 end
 
 function test_MLE(y, x_true=nothing)
@@ -722,12 +737,12 @@ function test_nile(n=10)
 		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
 		ys = range(0, 1000, length=500) 
 		pdf_values_q = pdf.(gamma_dist_q, ys)
-		plot!(p_sys_q, ys, pdf_values_q, label="", lw=0.8, linestyle=:dash)
+		plot!(p_sys_q, ys, pdf_values_q, label="", lw=0.8, ls=:dash)
 
 		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
 		xs = range(10000, 25000, length=500) 
 		pdf_values_r = pdf.(gamma_dist_r, xs)
-		plot!(p_obs_r, xs, pdf_values_r, label="", lw=0.8, linestyle=:dash)
+		plot!(p_obs_r, xs, pdf_values_r, label="", lw=0.8, ls=:dash)
 		plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")	
 	end
 
@@ -816,6 +831,49 @@ end
 # nile_kde(134, "gibbs")
 # nile_kde(134, "obs")
 
+# MCMC y one-step ahead pred?
+function mcmc_gen_y_pred(x_samples, r_samples)
+    T, num_samples = size(x_samples)
+    y_predictions = zeros(T-1, num_samples)
+
+    for i in 1:num_samples
+        for t in 1:T-1
+            r_sample = r_samples[i]
+            v_t_sample = rand(Normal(0, sqrt(1/r_sample)))
+            y_predictions[t, i] = x_samples[t+1, i] + v_t_sample
+        end
+    end
+
+    return y_predictions
+end
+
+function test_y_pred(n=10)
+	R = 100.0
+	Q = 10.0
+	println("Ground-truth r = $R, q = $Q")
+	Random.seed!(123)
+	y, _ = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 500)
+	@time s_x, s_q, s_r = gibbs_ll(y, 1.0, 1.0, 3000, 500, 1)
+	y_mcmc_gen = mcmc_gen_y_pred(s_x, s_r)
+	
+	y_m = mean(y_mcmc_gen, dims=2)[:]
+	println("mcmc mean: ", y_m[n])
+	# p_mcmc = plot(y_m, label="mcmc mean", lw=2)
+	# plot!(p_mcmc, y, color=:red, ls=:dash, label="y")
+	# display(p_mcmc)
+
+	p = histogram(y_mcmc_gen[n,: ], normalize=:pdf, label="y_$n")
+	display(p)
+
+	hpp_ll = Priors_ll(2, 1e-4, 2, 1e-4, 0.0, 1e7)
+	@time r, q, _, _, _ = vb_ll_c(y, hpp_ll, false, init="gibbs")
+
+	f_s, q_s = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll, y_pred=true)
+	println("vb mean: ", f_s[n], "\nvb_var: ", q_s[n])
+end
+
+#test_y_pred(300)
+
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
@@ -863,13 +921,11 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
-	#vb_x_m, vb_x_std, q_rq, _ = test_vb_ll(y, x_true, show_plot = true)
-	vb_x_m, vb_x_std, q_rq, els = test_vb_ll(y, x_true)
+	vb_x_m, vb_x_std, q_rq, els, avg_log_score = test_vb_ll(y, x_true)
+	println("VBEM avg log liklihood : ", avg_log_score)
 	p_els = plot(els, label="ElBO")
 	display(p_els)
-	"""
-	Choice of Gibbs, NUTS, HMC
-	"""
+
 	mcmc_x_m, mcmc_x_std, rs, qs = missing, missing, missing, missing
 	
 	if sampler == "gibbs" #default
@@ -902,12 +958,12 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
 	display(p_MCMC)
 
-	p = compare_mcmc_vi(mcmc_x_m, vb_x_m[2:end])
+	p = compare_mcmc_vi(mcmc_x_m[2:end], vb_x_m[2:end])
 	title!(p, "Latent X means")
 	xlabel!(p, "MCMC (ground-truth)")
 	display(p)
 
-	p2 = compare_mcmc_vi(mcmc_x_std, vb_x_std[2:end])
+	p2 = compare_mcmc_vi(mcmc_x_std[2:end], vb_x_std[2:end])
 	title!(p2, "Latent X stds")
 	xlabel!(p2, "MCMC (ground-truth)")
 	display(p2)
@@ -983,8 +1039,8 @@ function test_hyper_update(update=true)
 	display(p)
 end
 
-test_hyper_update(false)
-test_hyper_update(true)
+#test_hyper_update(false)
+#test_hyper_update(true)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

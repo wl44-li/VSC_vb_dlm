@@ -221,81 +221,67 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
     elbo_ll = zeros(n)
     elbo_ss = zeros(n)
 
+    y, x_true = missing, missing
+    rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
+    r = 0.5  # Observation noise variance
+    A_s = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
+    C_s = [1.0 0.0 0.0]  # Emission matrix
+    Q_s = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
+    R_s = [r]
+    x_1 = [0.50, 0.35, 0.15] # Satisfies identifiability constraint: sum to 0
+    y_sea, x_sea = gen_sea(A_s, C_s, R_s, Q_s, max_T, x_1)
+    K_s = size(A_s, 1)
+    prior_s = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K_s), Matrix{Float64}(I, K_s, K_s))
+
+    y_ll, x_ll = LocalLevel.gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
+    hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+
+    A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+    K_lg = size(A_lg, 1)
+    prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K_lg), Matrix{Float64}(I, K_lg, K_lg))
+    Q_lg = Diagonal([1.0, 1.0])
+    R_lg = [0.5]
+    μ_0 = zeros(K_lg)
+    Σ_0 = Diagonal(ones(K_lg))
+    y_lg, x_lg = LinearGrowth.gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, max_T)
+    
     for i in 1:n
         y, x_true = missing, missing
-        Random.seed!(i)
 
         if gen_fun == "S"
-            rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
-            r = 0.5  # Observation noise variance
-            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
-            C = [1.0 0.0 0.0]  # Emission matrix
-            Q = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
-            R = [r]
-            x_1 = [0.50, 0.35, 0.15] # Satisfies identifiability constraint: sum to 0
-           
-            y, x_true = gen_sea(A, C, R, Q, max_T, x_1)
-            K = size(A, 1)
-            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-
-            _, el_ss = vb_ss(y, A, C, prior)
+            y, x_true = y_sea, x_sea
+            _, el_ss = vb_ss(y, A_s, C_s, prior_s)
             elbo_ss[i] = el_ss[end]
 
-            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
             _, _, el_ll, _ = vb_ll_c(vec(y), hpp_ll)
             elbo_ll[i] = el_ll[end]
 
-            A_lg = [1.0 1.0; 0.0 1.0]
-            C_lg = [1.0 0.0]
-            K = size(A_lg, 1)
-            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
             _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
             elbo_lg[i] = el_lg[end]
         end
 
         if gen_fun == "LL"
-            y, x_true = LocalLevel.gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
-            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+            y, x_true = y_ll, x_ll
             _, _, el_ll, _ = vb_ll_c(y, hpp_ll)
             elbo_ll[i] = el_ll[end]
 
-            A_lg = [1.0 1.0; 0.0 1.0]
-            C_lg = [1.0 0.0]
-            K = size(A_lg, 1)
-            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
             _, _, el_lg, _ = vbem_lg_c(reshape(y, 1, :), A_lg, C_lg, prior_lg)
             elbo_lg[i] = el_lg[end]
 
-            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
-            C = [1.0 0.0 0.0]  # Emission matrix
-            K = size(A, 1)
-            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-            _, el_ss = vb_ss(reshape(y, 1, :), A, C, prior)
+            _, el_ss = vb_ss(reshape(y, 1, :), A_s, C_s, prior_s)
             elbo_ss[i] = el_ss[end]
         end
 
         if gen_fun == "LT"
-            A_lg = [1.0 1.0; 0.0 1.0]
-            C_lg = [1.0 0.0]
-            Q = Diagonal([1.0, 1.0])
-            R = [0.1]
-            K = size(A_lg, 1)
-            μ_0 = zeros(K)
-            Σ_0 = Diagonal(ones(K))
-            y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, μ_0, Σ_0, max_T)
-            prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K), Matrix{Float64}(I, K, K))
+            y, x_true = y_lg, x_lg
             _, _, el_lg, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
             elbo_lg[i] = el_lg[end]
 
-            hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
             _, _, el_ll, _ = vb_ll_c(vec(y), hpp_ll)
             elbo_ll[i] = el_ll[end]
 
-            A = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
-            C = [1.0 0.0 0.0]  # Emission matrix
-            K = size(A, 1)
-            prior = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K), Matrix{Float64}(I, K, K))
-            _, el_ss = vb_ss(reshape(y, 1, :), A, C, prior)
+            _, el_ss = vb_ss(reshape(y, 1, :), A_s, C_s, prior_s)
             elbo_ss[i] = el_ss[end]
         end
 
@@ -313,8 +299,9 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
     groups = repeat(["LLM", "LTM", "SM"], inner = length(elbo_ll))
     all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
 
-    p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ELBO", legend=false)
-    title!(p, "ELBO Model Selection, data:$gen_fun")
+    p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
+    title!(p, "ElBO Model Selection, data:$gen_fun")
+    #ylims!(p, -5000, -500)
     display(p)
 end
 
