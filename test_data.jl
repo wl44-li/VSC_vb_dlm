@@ -21,46 +21,12 @@ function get_Nile()
     return y
 end
 
-# Not a suitable example 
-function get_log_FinTraff()
-    df = CSV.File(StateSpaceModels.VEHICLE_FATALITIES) |> DataFrame
-    log_ff = log.(df.ff)
-    return df, log_ff
+function get_airp()
+	air_passengers_df = CSV.File(StateSpaceModels.AIR_PASSENGERS) |> DataFrame 
+	return air_passengers_df.month, Float64.(air_passengers_df.passengers)
 end
 
-
-""" To-Do: fix gibbs, vb for Finland traffic data
-function test_traffic()
-	df_traff, log_y = get_log_FinTraff()
-	println(size(log_y))
-	p = plot(df_traff.date, log_y, label="log of Finland traffic fatalities")
-	display(p)
-
-	model = LocalLinearTrend(log_y)
-	StateSpaceModels.fit!(model)
-	print_results(model)
-
-	p_s = plot(df_traff.date, get_smoothed_state(model)[:, 2], label="slope (MLE)")
-	display(p_s)
-
-	# test_gibbs(reshape(log_y, 1, :))
-	# A_lg = [1.0 1.0; 0.0 1.0]
-	# C_lg = [1.0 0.0]
-	# K = size(A_lg, 1)
-	# prior = HPP_D(2, 1e-4, 2, 1e-4, zeros(K), Matrix{Float64}(I * 1e7, K, K))
-	
-	# @time R, Q, elbos, Q_gam = vbem_lg_c(reshape(log_y, 1, :), A_lg, C_lg, prior, false, 20, init="fixed", debug=false)
-	# μs_f, σs_f2, A_s, Rs, _ = forward_(reshape(log_y, 1, :), A_lg, C_lg, R, Q, prior)
-	# μs_s, _, _ = backward_(A_lg, μs_f, σs_f2, A_s, Rs)
-	
-	# println("\nVB q(R):")
-	# show(stdout, "text/plain", R)
-	# println("\n\nVB q(Q):")
-	# show(stdout, "text/plain", Q)
-	# p_s = plot(df_traff.date, μs_s[:, 2], label="slope (VB)")
-	# display(p_s)
-end
-
-"""
+#months, pass = get_airp()
+#plot(months, pass, label="")
 
 #main()

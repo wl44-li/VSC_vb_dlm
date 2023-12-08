@@ -215,37 +215,52 @@ function test_vb_static(iter)
     plot_latent(x', μs')
 end
 
-
-function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
+function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     elbo_lg = zeros(n)
     elbo_ll = zeros(n)
     elbo_ss = zeros(n)
 
     y, x_true = missing, missing
     rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
-    r = 0.5  # Observation noise variance
+    r = 5.0  # Observation noise variance
     A_s = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
     C_s = [1.0 0.0 0.0]  # Emission matrix
     Q_s = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
     R_s = [r]
-    x_1 = [0.50, 0.35, 0.15] # Satisfies identifiability constraint: sum to 0
+    #x_1 = [0.33, 0.34, 0.33] # Satisfies identifiability constraint: sum to 0
+    x_1 = [6.0, -18.0, 12.0]
     y_sea, x_sea = gen_sea(A_s, C_s, R_s, Q_s, max_T, x_1)
     K_s = size(A_s, 1)
     prior_s = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K_s), Matrix{Float64}(I, K_s, K_s))
 
-    y_ll, x_ll = LocalLevel.gen_data(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, max_T)
-    hpp_ll = Priors_ll(0.1, 0.1, 0.1, 0.1, 0.0, 1.0)
+    if gen_fun == "S"
+        p = plot(y_sea', label="S")
+        display(p)
+    end
+
+    y_ll, x_ll = LocalLevel.gen_data(1.0, 1.0, 1.0, 5.0, 0.0, 1.0, max_T)
+    hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e6)
+
+    if gen_fun == "LL"
+        p = plot(y_ll, label="LL")
+        display(p)
+    end
 
     A_lg = [1.0 1.0; 0.0 1.0]
     C_lg = [1.0 0.0]
     K_lg = size(A_lg, 1)
-    prior_lg = HPP_D(0.1, 0.1, 0.1, 0.1, zeros(K_lg), Matrix{Float64}(I, K_lg, K_lg))
+    prior_lg = HPP_D(2, 1e-3, 2, 1e-3, zeros(K_lg), Matrix{Float64}(I * 1e6, K_lg, K_lg))
     Q_lg = Diagonal([1.0, 1.0])
-    R_lg = [0.5]
+    R_lg = [5.0]
     μ_0 = zeros(K_lg)
     Σ_0 = Diagonal(ones(K_lg))
     y_lg, x_lg = LinearGrowth.gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, max_T)
     
+    if gen_fun == "LT"
+        p = plot(y_lg', label="LG")
+        display(p)
+    end
+
     for i in 1:n
         y, x_true = missing, missing
 
@@ -287,7 +302,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
 
     end
 
-    # println(elbo_ss)
+    println(elbo_ss)
     # println(elbo_ll)
     # println(elbo_lg)
 
@@ -296,17 +311,17 @@ function vi_elbo_comp(gen_fun = "S", max_T = 500, n=10)
 	println("\tLT:", mean(elbo_lg))
 	println("\tSS:", mean(elbo_ss))
     
-    groups = repeat(["LLM", "LTM", "SM"], inner = length(elbo_ll))
+    groups = repeat(["LLM", "LTM", "S"], inner = length(elbo_ll))
     all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
 
     p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
     title!(p, "ElBO Model Selection, data:$gen_fun")
-    #ylims!(p, -5000, -500)
+    #ylims!(p, -800, -200)
     display(p)
 end
 
-vi_elbo_comp("S")
+#vi_elbo_comp("S", 100)
 
-#vi_elbo_comp("LL")
+vi_elbo_comp("LL", 100)
 
-#vi_elbo_comp("LT")
+vi_elbo_comp("LT", 100)

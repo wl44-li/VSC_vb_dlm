@@ -676,7 +676,7 @@ function main_graph(n, sd)
 	plot_elbo = plot(els, label="ElBO")
 	display(plot_elbo)
 
-	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 15000, 10000, 1, show_plot=true)
+	xm_mcmc, std_mcmc, p_r, p_q1, p_q2 = test_gibbs(y, x_true, 30000, 10000, 3, show_plot=true)
 
 	plot_r = plot_mcmc_vi_gamma(Q_gam.a, (Q_gam.b)[1], p_r, R[1], 0.0, 30.0)
 	xlabel!(plot_r, "R")
@@ -698,6 +698,7 @@ function main_graph(n, sd)
 
 	p_v = compare_mcmc_vi(std_mcmc[1, :], std_vb[1, 2:end])
 	title!(p_v, "Latent X[1,:] stds")
+	#xlims!(p_v, 2.9, 3.2) # zoom-in to show vi under-esitmated std
 	display(p_v)
 
 	p2 = compare_mcmc_vi(xm_mcmc[2, :], xm_vb[2, 2:end])
@@ -706,7 +707,9 @@ function main_graph(n, sd)
 
 	p_2v = compare_mcmc_vi(std_mcmc[2, :], std_vb[2, 2:end])
 	title!(p_2v, "Latent X[2,:] stds")
+	#xlims!(p_2v, 2.2, 2.4) # zoom-in to show vi under-esitmated std
 	display(p_2v)
+
 	println("----- END Run seed: $sd -----\n")
 end
 

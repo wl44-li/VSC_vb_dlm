@@ -921,6 +921,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
+	test_MLE(y, x_true)
 	vb_x_m, vb_x_std, q_rq, els, avg_log_score = test_vb_ll(y, x_true)
 	println("VBEM avg log liklihood : ", avg_log_score)
 	p_els = plot(els, label="ElBO")
@@ -966,6 +967,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	p2 = compare_mcmc_vi(mcmc_x_std[2:end], vb_x_std[2:end])
 	title!(p2, "Latent X stds")
 	xlabel!(p2, "MCMC (ground-truth)")
+	#xlims!(p2, 4.0, 4.25) # zoom-in to show vi under-esitmated std
 	display(p2)
 end
 

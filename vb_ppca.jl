@@ -137,7 +137,7 @@ end
 function vb_e(ys, exp_np::Exp_ϕ, hpp::HPP, smooth_out=false)
     _, T = size(ys)
 	# forward pass α_t(x_t) suffices as A = 0 matrix
-	ωs, Υs, _ = v_forward(ys, exp_np, hpp)
+	ωs, Υs = v_forward(ys, exp_np, hpp)
 	
 	# hidden state sufficient stats 	
 	W_C = sum(Υs[:, :, t] + ωs[:, t] * ωs[:, t]' for t in 1:T)
@@ -206,7 +206,7 @@ function vb_ppca(ys, hpp::HPP, hpp_learn=false, max_iter=500)
 	return exp_np
 end
 
-function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init="random", debug=false)
+function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init="mle", debug=false)
 	P, _ = size(ys)
 	K = length(hpp.γ)
 	hss = missing
@@ -281,8 +281,8 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-4; init=
 	if init == "random"
 		# init R and C, needs more testing
 		println("\t--- VB PPCA using random initilaization ---")
-		#ρ_init = 0.5 / 0.5
-		ρ_init = hpp.a / hpp.b
+		ρ_init = 0.5 / 0.5
+		#ρ_init = hpp.a / hpp.b
 
 		R = diagm(ones(P) .* ρ_init)
 
@@ -516,11 +516,48 @@ function k_elbo_p4(y, n=10, hyper_optim=false; verboseOut=false)
     display(p2)
 end
 
-function comp_mcmc_vb(mcmc_mode="hmc")
+function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
+    # Ensure all vectors have the same length
+    @assert length(mcmc) == length(vi) "All vectors must have the same length"
+    
+	p_mcmc = scatter(mcmc, vi, label="", color=:red, ms=2, alpha=0.5)
+	p_vi = scatter!(p_mcmc, mcmc, vi, label="", ylabel = "VI", ms=2, color=:green, alpha=0.5)
+
+	# Determine the range for the y=x line
+	min_val = min(minimum(mcmc), minimum(vi))
+	max_val = max(maximum(mcmc), maximum(vi))
+
+	# Plot the y=x line
+	plot!(p_vi, [min_val, max_val], [min_val, max_val], ls=:dash, label = "", color=:blue, lw=2)
+
+	return p_vi
+end
+
+function test_vb_trivial()
 	T = 500
     C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([1.0, 1.0])
     y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, T)
+
+	K = 1
+	γ = ones(K)
+	a = 2
+	b = 1e-3
+	μ_0 = zeros(K)
+	Σ_0 = Matrix{Float64}(I, K, K)
+	hpp = HPP(γ, a, b, μ_0, Σ_0)
+	exp_np, _, _, qθ = vb_ppca_c(y, hpp, false, init="mle")
+
+	return exp_np, qθ
+end
+
+#exp_np, qθ = test_vb_trivial()
+
+function comp_mcmc_vb(mcmc_mode="hmc")
+	T = 500
+    C_d2k1 = reshape([1.0, 0.5], 2, 1)
+    R_2 = Diagonal([1.0, 1.0])
+    y, x_true = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, T)
 
 	mcmc_chain = missing
 	if mcmc_mode == "hmc"
@@ -539,10 +576,40 @@ function comp_mcmc_vb(mcmc_mode="hmc")
 	Σ_0 = Matrix{Float64}(I, K, K)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	_, _, _, qθ = vb_ppca_c(y, hpp, false, init="random")
+	exp_np, _, _, qθ = vb_ppca_c(y, hpp, false, init="random")
 
-	return mcmc_chain, qθ
+	return mcmc_chain, qθ, exp_np, x_true, y
 end
+
+# hmc_chain, _, exp_np, x_true, y = comp_mcmc_vb()
+# T = 500
+# x_means = Vector{Float64}(undef, T)
+# x_stds = Vector{Float64}(undef, T)
+
+# for t in 1:T
+# 	samples = hmc_chain[Symbol("x[1,$t]")].data
+# 	x_means[t] = mean(samples)
+# 	x_stds[t] = std(samples)
+# end
+
+# K = 1
+# γ = ones(K)
+# a = 2
+# b = 1e-3
+# μ_0 = zeros(K)
+# Σ_0 = Matrix{Float64}(I, K, K)
+# hpp = HPP(γ, a, b, μ_0, Σ_0)
+
+# ωs, Σs = v_forward(y, exp_np, hpp)
+
+# p_mean = compare_mcmc_vi(abs.(x_means), abs.(vec(ωs)))
+# xlabel!(p_mean, "MCMC (ground-truth)")
+# display(p_mean)
+
+# p_std = compare_mcmc_vi(x_stds, vec(sqrt.(Σs)))
+# #xlims!(p_std, 0.65, 0.75)
+# xlabel!(p_std, "MCMC (ground-truth)")
+# display(p_std)
 
 function gen_plots(mode="hmc")
 	mcmc_chain_k1, qθ_k1 = comp_mcmc_vb(mode)
@@ -551,8 +618,14 @@ function gen_plots(mode="hmc")
 	p_t = density(τs, label = "MCMC($mode)", lw=2)
 	gamma_dist_r = InverseGamma(qθ_k1.a_s, qθ_k1.b_s)
 	xs = range(0.8, 1.2, length=100)
+
+	ci_lower = quantile(gamma_dist_r, 0.025)
+	ci_upper = quantile(gamma_dist_r, 0.975)
+
 	pdf_values = pdf.(gamma_dist_r, xs)
 	plot!(p_t, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	plot!(p_t, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, ms=2, color=:red, label="95% CI", lw=2)
+	vspan!(p_t, [ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
 	xlabel!(p_t, "σ²")
 	display(p_t)
 
@@ -562,6 +635,10 @@ function gen_plots(mode="hmc")
 	xs = range(0.8, 1.3, length=100)
 	pdf_values = pdf.(norm_c_1, xs)
 	plot!(p1, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	ci_lower = quantile(norm_c_1, 0.025)
+	ci_upper = quantile(norm_c_1, 0.975)
+	plot!(p1, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, ms=2, color=:red, label="95% CI", lw=2)
+	vspan!(p1, [ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
 	xlabel!(p1, "C[1, 1]")
 	display(p1)
 
@@ -570,6 +647,10 @@ function gen_plots(mode="hmc")
 	xs = range(0.3, 0.8, length=100)
 	pdf_values = pdf.(norm_c_2, xs)
 	plot!(p2, xs, pdf_values, label="VI", lw=2, ylabel="Density")
+	ci_lower = quantile(norm_c_2, 0.025)
+	ci_upper = quantile(norm_c_2, 0.975)
+	plot!(p2, [ci_lower, ci_upper], [0, 0], line=:stem, marker=:circle, ms=2, color=:red, label="95% CI", lw=2)
+	vspan!(p2, [ci_lower, ci_upper], fill=:red, alpha=0.1, label=nothing)
 	xlabel!(p2, "C[2, 1]")
 	display(p2)
 end
@@ -612,6 +693,8 @@ function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
 
 	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)
 
+	xs, xs_var = v_forward(y, exp_np, hpp)
+
 	if debug
 		#println("ELBOs: ", els)
 		println("ELBOs end: ", els[end])
@@ -620,7 +703,7 @@ function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
 	end
 
 	# return matrix of factor loadings (W), and isotropic noise (σ²)
-	return exp_np.C, exp_np.R⁻¹[1, 1], els
+	return exp_np.C, exp_np.R⁻¹[1, 1], els, xs, xs_var
 end
 
 # PLUTO_PROJECT_TOML_CONTENTS = """

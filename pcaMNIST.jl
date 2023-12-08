@@ -168,7 +168,7 @@ function show_mle(y_st, y_st_0)
     display(p_mle_n1)
 end
 
-show_mle(y_st, y_st_0)
+#show_mle(y_st, y_st_0)
 
 # C, _, els_1 = vb_ppca_k2(y_st, 80, true, mode="mle")
 # M_vb = svd(C).U
@@ -201,7 +201,32 @@ function show_vb_mnist_progress(y_st, y_st_0, i_start, i_end, n)
     end
 end
 
-show_vb_mnist_progress(y_st, y_st_0, 5, 505, 100)
+function mnist_vb(y_st, y_st_0, i_start, i_end, n)
+    for i in range(i_start, i_end, step=n)
+
+        _, _, _, xs_1, xs_std_1 = vb_ppca_k2(y_st, i, true, mode="mle")
+
+        _, _, _, xs_0, xs_std_0 = vb_ppca_k2(y_st_0, i, true, mode="mle")
+
+        #println(size(xs_1))
+       # println(size(xs_std_1))
+
+        p_vb_n1 = plot()
+        p_vb_n1 = scatter(xs_1[1, :], xs_1[2, :], c=:blue, label="Digit 1 (VB, std)", ms=1.5, msw=0, 
+        legend = :topleft, xlabel="PC 1", ylabel="PC 2")
+    
+        scatter!(p_vb_n1, xs_0[1, :], xs_0[2, :], c=:red, label="Digit 0 (VB, std)", ms=1.5, msw=0, 
+        legend = :topleft, xlabel="PC 1", ylabel="PC 2")
+        display(p_vb_n1)
+
+        println("mean std x_1 : ", mean(xs_std_1, dims=3))
+        println("mean std x_0 : ", mean(xs_std_0, dims=3))
+    end
+end
+
+#mnist_vb(y_st, y_st_0, 5, 505, 100)
+
+#show_vb_mnist_progress(y_st, y_st_0, 5, 505, 100)
 
 # function test_vb_ppca(y, n=10)
 #     plots = []
