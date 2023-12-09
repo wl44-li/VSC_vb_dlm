@@ -147,13 +147,13 @@ end
 
 #test_e_static()
 
-function vb_ss(ys, A, C, prior::HPP_D, max_iter=500, tol=1e-4, init="random")
+function vb_ss(ys, A, C, prior::HPP_D, max_iter=500, tol=1e-5, init="random")
 	D, _ = size(ys)
     E_R = missing
     W_C, S_C = missing, missing
 
     if init == "random"
-        r = rand(InverseGamma(prior.a, prior.b))
+        r = rand(InverseGamma(prior.a, 1/prior.b))
         R_init = diagm(ones(D) .* r)
         W_C, S_C, _ = vb_e_static(ys, A, C, R_init, prior)
     end
@@ -215,26 +215,84 @@ function test_vb_static(iter)
     plot_latent(x', μs')
 end
 
+function test_seasonal_k(y, k, n=10)
+    A = []
+    A_1 = ones(k-1) .* (-1)
+    push!(A, A_1)
+
+    for i in 1:(k-2)
+        A_i = zeros(k-1)
+        A_i[i] = 1.0
+        push!(A, A_i)
+    end
+
+    A_s = vcat(A'...)
+    prior_s = HPP_D(2, 0.001, 2, 0.001, zeros(k-1), Matrix{Float64}(I * 1e6, k-1, k-1))
+    C_s = zeros(k-1)  # Emission matrix
+    C_s[1] = 1.0
+
+    elss = zeros(n)
+    for i in 1:n
+        _, el_ss = vb_ss(y, A_s, reshape(C_s, 1, :), prior_s)
+        elss[i] = el_ss[end]
+    end
+
+    return elss
+end
+
+function test_air_pass(n=10)
+    _, y = get_airp()
+    y = diff(y, dims=1)
+    insert!(y, 1, 0)
+    y = reshape(y, 1, :)
+    elss = test_seasonal_k(y, 12)
+
+    hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e6)
+    prior_lg = HPP_D(2, 1e-3, 2, 1e-3, zeros(2), Matrix{Float64}(I * 1e6, 2, 2))
+    A_lg = [1.0 1.0; 0.0 1.0]
+    C_lg = [1.0 0.0]
+
+    el_ll = zeros(n)
+    el_lg = zeros(n)
+
+    for i in 1:n
+        _, _, el_l, _ = vb_ll_c(vec(y), hpp_ll)
+        el_ll[i] = el_l[end]
+        _, _, el_g, _ = vbem_lg_c(y, A_lg, C_lg, prior_lg)
+        el_lg[i] = el_g[end]
+    end
+
+    println("SS ", elss)
+    println("ll ", el_ll)
+    println("lg ", el_lg)
+
+    groups = repeat(["Local Level", "Linear Growth", "Seasonal"], inner = n)
+    all_elbos = vcat(el_ll, el_lg, elss)
+    p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
+    display(p)
+end
+
+test_air_pass()
+
 function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     elbo_lg = zeros(n)
     elbo_ll = zeros(n)
     elbo_ss = zeros(n)
 
     y, x_true = missing, missing
-    rho = 0.0  # System evolution parameter, static seasonal model: rho = 0
-    r = 5.0  # Observation noise variance
+    r = 20.0  # Observation noise variance
     A_s = [-1.0 -1.0 -1.0; 1.0 0.0 0.0; 0.0 1.0 0.0]  # State transition matrix
     C_s = [1.0 0.0 0.0]  # Emission matrix
-    Q_s = Diagonal([rho, 0.0, 0.0])  # System evolution noise covariance
+    Q_s = Diagonal([0.0, 0.0, 0.0])  # System evolution noise covariance
     R_s = [r]
     #x_1 = [0.33, 0.34, 0.33] # Satisfies identifiability constraint: sum to 0
-    x_1 = [6.0, -18.0, 12.0]
+    x_1 = [10.0, -35.0, 25.0]
     y_sea, x_sea = gen_sea(A_s, C_s, R_s, Q_s, max_T, x_1)
     K_s = size(A_s, 1)
-    prior_s = HPP_D(0.01, 0.01, 0.01, 0.01, zeros(K_s), Matrix{Float64}(I, K_s, K_s))
+    prior_s = HPP_D(2.0, 0.01, 2.0, 0.01, zeros(K_s), Matrix{Float64}(I, K_s, K_s))
 
     if gen_fun == "S"
-        p = plot(y_sea', label="S")
+        p = plot(y_sea', label="Seasonal")
         display(p)
     end
 
@@ -242,7 +300,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e6)
 
     if gen_fun == "LL"
-        p = plot(y_ll, label="LL")
+        p = plot(y_ll, label="Local Level")
         display(p)
     end
 
@@ -257,7 +315,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     y_lg, x_lg = LinearGrowth.gen_data(A_lg, C_lg, Q_lg, R_lg, μ_0, Σ_0, max_T)
     
     if gen_fun == "LT"
-        p = plot(y_lg', label="LG")
+        p = plot(y_lg', label="Linear Growth")
         display(p)
     end
 
@@ -302,7 +360,7 @@ function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
 
     end
 
-    println(elbo_ss)
+    # println(elbo_ss)
     # println(elbo_ll)
     # println(elbo_lg)
 
@@ -311,17 +369,17 @@ function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
 	println("\tLT:", mean(elbo_lg))
 	println("\tSS:", mean(elbo_ss))
     
-    groups = repeat(["LLM", "LTM", "S"], inner = length(elbo_ll))
+    groups = repeat(["Local Level", "Linear Growth", "Seasonal"], inner = length(elbo_ll))
     all_elbos = vcat(elbo_ll, elbo_lg, elbo_ss)
 
     p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
-    title!(p, "ElBO Model Selection, data:$gen_fun")
+    #title!(p, "ElBO Model Selection, data:$gen_fun")
     #ylims!(p, -800, -200)
     display(p)
 end
 
 #vi_elbo_comp("S", 100)
 
-vi_elbo_comp("LL", 100)
+#vi_elbo_comp("LL", 100)
 
-vi_elbo_comp("LT", 100)
+#vi_elbo_comp("LT", 100)
