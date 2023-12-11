@@ -594,26 +594,41 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
 	return τ_
 end
 
-function plot_CI_ll(μ_s, σ_s2, x_true=nothing, max_T=30)
-	# μ_s :: vector of normal mean
-	# σ_s2 :: vector of corresponding variance
-	μ_s = μ_s[1:max_T]
-	σ_s2 = σ_s2[1:max_T]
 
+"""
+plot 95% credible interval of latent level component
+
+max_T display the maximum length of latent sequence to be plotted (zoomed-in view)
+"""
+
+function plot_CI_ll(μ_s, stds, x_true=nothing, max_T=30; nile_test=false)
+	# μ_s :: vector of normal mean
+	# stds :: vector of corresponding standard derivation
+
+	μ_s = μ_s[1:max_T]
+	stds = stds[1:max_T]
+
+	# ignore x_0 
 	if x_true !== nothing
 		x_true = x_true[2:max_T+1]
 	end
 
 	# https://en.wikipedia.org/wiki/Standard_error, 95% CI
-	lower_bound = μ_s - 1.96 .* sqrt.(σ_s2)
-	upper_bound = μ_s + 1.96 .* sqrt.(σ_s2)
+	lower_bound = μ_s - 1.96 .* stds
+	upper_bound = μ_s + 1.96 .* stds
 	
 	T = 1:max_T
-	p = plot(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.5,
-		label="95% CI", linewidth=2)
+
+	if nile_test
+		T = 1871:1970
+	end
+
+	p = plot(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.2,
+		label="VI level with 95% CI", lw=1.5, color=:orange, ls=:dash)
 	
 	if x_true !== nothing
-		plot!(T, x_true, label = "ground_truth")
+		scatter!(T, x_true, label="Ground_truth x_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
+		plot!(T, x_true, color=:grey, lw=1, label="")
 	end
 	return p
 end
@@ -636,17 +651,11 @@ function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 	end
 
 	if show_plot
-		p = plot(x_std, label = "", title="VI x std")
-		display(p)
+		p_stds = plot(x_std, label = "", title="VI x std")
+		display(p_stds)
 		
-		p = plot(els, label = "elbo", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		p = plot(els, label = "ElBO", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
 		display(p)
-
-		#x_plot = plot_CI_ll(μs_s[2:end], σs_s[2:end], x_true, length(y))
-		#title!("Local Level x 95% CI, Hyper-param update: $hyperoptim")
-		#display(x_plot)
-		#plot_file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).svg"
-		#savefig(x_plot, joinpath(expanduser("~/Downloads/_graphs"), plot_file_name))
 	end
 
 	return μs_s, x_std, q_rq, els, avg_ll
@@ -696,6 +705,43 @@ function test_Nile_ffbs()
 end
 
 #test_Nile_ffbs()
+
+function test_Nile_level(max_T=50)
+	y = get_Nile()
+	y = vec(y)
+	y = Float64.(y)
+
+	hpp_ll = Priors_ll(2, 1e-6, 2, 1e-6, 0.0, 1e7)
+	r, q, _, _, _ = vb_ll_c(y, hpp_ll, false, 500, 1e-4, init="gibbs_conver")
+	μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+	vb_x_m, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
+	vb_x_std = sqrt.(σs_s)
+
+	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], nothing, max_T, nile_test=true)
+	#display(p)
+
+	mcmc_xs, _, _ = gibbs_ll(y, 1.0, 1.0, 3000, 0, 1)
+	mcmc_x_m = mean(mcmc_xs, dims=2)[:]	
+	mcmc_x_std = std(mcmc_xs, dims=2)[:]
+	μ_s = mcmc_x_m[2:max_T+1]
+	stds = mcmc_x_std[2:max_T+1]
+
+	lower_bound = μ_s - 1.96 .* stds
+	upper_bound = μ_s + 1.96 .* stds
+	
+	T = 1871:1970
+	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
+	#display(p)
+
+	return p
+end
+
+p = test_Nile_level(100)
+y = Float64.(vec(get_Nile()))
+scatter!(p, 1871:1970, y, label="Data y_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
+plot!(p, 1871:1970, y, color=:grey, lw=1, label="")
+ylabel!(p, "Level")
+display(p)
 
 function test_nile(n=10)
 	y = get_Nile()
@@ -874,6 +920,41 @@ end
 
 #test_y_pred(300)
 
+function timing_exp(T_s, T_e)
+	t_vb = []
+	t_mcmc = []
+	Q = 10.0
+	R = 100.0
+
+	for i in range(T_s, T_e, 10)
+		Random.seed!(10)
+		y, _ = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, Int(i))
+
+		hpp_ll = Priors_ll(2, 1e-4, 2, 1e-4, 0.0, 1e7)
+		vb_t_i = @elapsed vb_ll_c(y, hpp_ll, false, init="gibbs")
+		push!(t_vb, vb_t_i)
+
+		gibbs_t_i = @elapsed gibbs_ll(y, 1.0, 1.0, 10000, 5000, 1)
+		push!(t_mcmc, gibbs_t_i)
+	end
+
+	xs = range(T_s, T_e, 10)
+	p = scatter(xs, log.(t_mcmc), label="mcmc")
+	plot!(xs, log.(t_mcmc), label="", lw=1, color=:blue)
+	xlabel!(p, "Number of data points (T)")
+	ylabel!(p, "Running time (seconds)")
+
+	scatter!(xs, log.(t_vb), label="vi", color=:orange)
+	plot!(xs, log.(t_vb), label="", lw=1, color=:orange)
+	display(p)
+	return p
+end
+
+#p = timing_exp(9000, 63000)
+# scatter!(xs, log.(t_vb), label="vi", color=:orange)
+# plot!(xs, log.(t_vb), label="", lw=1, color=:orange)
+# display(p)
+
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
     @assert length(mcmc) == length(vi) "All vectors must have the same length"
@@ -967,9 +1048,39 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	p2 = compare_mcmc_vi(mcmc_x_std[2:end], vb_x_std[2:end])
 	title!(p2, "Latent X stds")
 	xlabel!(p2, "MCMC (ground-truth)")
-	#xlims!(p2, 4.0, 4.25) # zoom-in to show vi under-esitmated std
 	display(p2)
 end
+
+function plot_latent_level(max_T=30)
+	R = 100.0
+	Q = 10.0
+	println("Ground-truth r = $R, q = $Q")
+	Random.seed!(111)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 500)
+	vb_x_m, vb_x_std, _, _, _ = test_vb_ll(y, x_true)
+	mcmc_x_m, mcmc_x_std, _, _ = test_gibbs_ll(y, x_true, 10000, 5000, 1)
+
+	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], x_true, max_T)
+	ylabel!(p, "Level")
+	display(p)
+
+	μ_s = mcmc_x_m[2:max_T+1]
+	stds = mcmc_x_std[2:max_T+1]
+
+	if x_true !== nothing
+		x_true = x_true[2:max_T+1]
+	end
+
+	lower_bound = μ_s - 1.96 .* stds
+	upper_bound = μ_s + 1.96 .* stds
+	
+	T = 1:max_T
+	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
+	display(p)
+end
+
+plot_latent_level(500)
+plot_latent_level(50)
 
 #main_graph(10, 500, "gibbs")
 
