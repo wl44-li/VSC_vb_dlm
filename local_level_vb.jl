@@ -601,23 +601,21 @@ plot 95% credible interval of latent level component
 max_T display the maximum length of latent sequence to be plotted (zoomed-in view)
 """
 
-function plot_CI_ll(μ_s, stds, x_true=nothing, max_T=30; nile_test=false)
+function plot_CI_ll(μ_s, stds, x_true=nothing, T_s=1, T_end=30; nile_test=false)
 	# μ_s :: vector of normal mean
 	# stds :: vector of corresponding standard derivation
-
-	μ_s = μ_s[1:max_T]
-	stds = stds[1:max_T]
+	μ_s = μ_s[T_s:T_end]
+	stds = stds[T_s:T_end]
 
 	# ignore x_0 
 	if x_true !== nothing
-		x_true = x_true[2:max_T+1]
+		x_true = x_true[2:end]
 	end
 
 	# https://en.wikipedia.org/wiki/Standard_error, 95% CI
 	lower_bound = μ_s - 1.96 .* stds
 	upper_bound = μ_s + 1.96 .* stds
-	
-	T = 1:max_T
+	T = T_s:T_end
 
 	if nile_test
 		T = 1871:1970
@@ -627,8 +625,8 @@ function plot_CI_ll(μ_s, stds, x_true=nothing, max_T=30; nile_test=false)
 		label="VI level with 95% CI", lw=1.5, color=:orange, ls=:dash)
 	
 	if x_true !== nothing
-		scatter!(T, x_true, label="Ground_truth x_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
-		plot!(T, x_true, color=:grey, lw=1, label="")
+		#scatter!(T, x_true[T_s:T_end], label="Ground_truth x_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
+		plot!(T, x_true[T_s:T_end], color=:grey, lw=1, label="Ground_truth x_t")
 	end
 	return p
 end
@@ -706,7 +704,7 @@ end
 
 #test_Nile_ffbs()
 
-function test_Nile_level(max_T=50)
+function test_Nile_level()
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
@@ -717,14 +715,14 @@ function test_Nile_level(max_T=50)
 	vb_x_m, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	vb_x_std = sqrt.(σs_s)
 
-	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], nothing, max_T, nile_test=true)
+	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], nothing, 1, 100, nile_test=true)
 	#display(p)
 
 	mcmc_xs, _, _ = gibbs_ll(y, 1.0, 1.0, 3000, 0, 1)
 	mcmc_x_m = mean(mcmc_xs, dims=2)[:]	
 	mcmc_x_std = std(mcmc_xs, dims=2)[:]
-	μ_s = mcmc_x_m[2:max_T+1]
-	stds = mcmc_x_std[2:max_T+1]
+	μ_s = mcmc_x_m[2:end]
+	stds = mcmc_x_std[2:end]
 
 	lower_bound = μ_s - 1.96 .* stds
 	upper_bound = μ_s + 1.96 .* stds
@@ -736,12 +734,12 @@ function test_Nile_level(max_T=50)
 	return p
 end
 
-p = test_Nile_level(100)
-y = Float64.(vec(get_Nile()))
-scatter!(p, 1871:1970, y, label="Data y_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
-plot!(p, 1871:1970, y, color=:grey, lw=1, label="")
-ylabel!(p, "Level")
-display(p)
+# p = test_Nile_level()
+# y = Float64.(vec(get_Nile()))
+# scatter!(p, 1871:1970, y, label="Data y_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
+# plot!(p, 1871:1970, y, color=:grey, lw=1, label="")
+# ylabel!(p, "Level")
+# display(p)
 
 function test_nile(n=10)
 	y = get_Nile()
@@ -874,10 +872,6 @@ function nile_kde(sd, init)
 	display(p_MCMC)
 end
 
-# nile_kde(134, "gibbs")
-# nile_kde(134, "obs")
-
-# MCMC y one-step ahead pred?
 function mcmc_gen_y_pred(x_samples, r_samples)
     T, num_samples = size(x_samples)
     y_predictions = zeros(T-1, num_samples)
@@ -1051,7 +1045,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	display(p2)
 end
 
-function plot_latent_level(max_T=30)
+function plot_latent_level(T_s=1, T_end=30)
 	R = 100.0
 	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
@@ -1060,27 +1054,23 @@ function plot_latent_level(max_T=30)
 	vb_x_m, vb_x_std, _, _, _ = test_vb_ll(y, x_true)
 	mcmc_x_m, mcmc_x_std, _, _ = test_gibbs_ll(y, x_true, 10000, 5000, 1)
 
-	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], x_true, max_T)
+	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], x_true, T_s, T_end)
 	ylabel!(p, "Level")
 	display(p)
 
-	μ_s = mcmc_x_m[2:max_T+1]
-	stds = mcmc_x_std[2:max_T+1]
+	μ_s = mcmc_x_m[2:end]
+	stds = mcmc_x_std[2:end]
 
-	if x_true !== nothing
-		x_true = x_true[2:max_T+1]
-	end
-
-	lower_bound = μ_s - 1.96 .* stds
-	upper_bound = μ_s + 1.96 .* stds
+	lower_bound = μ_s[T_s:T_end] - 1.96 .* stds[T_s:T_end]
+	upper_bound = μ_s[T_s:T_end] + 1.96 .* stds[T_s:T_end]
 	
-	T = 1:max_T
-	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
+	T = T_s:T_end
+	plot!(T, μ_s[T_s:T_end], ribbon=(μ_s[T_s:T_end]-lower_bound, upper_bound-μ_s[T_s:T_end]), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
 	display(p)
 end
 
-plot_latent_level(500)
-plot_latent_level(50)
+#plot_latent_level(1, 500)
+#plot_latent_level(21, 30)
 
 #main_graph(10, 500, "gibbs")
 

@@ -240,6 +240,9 @@ function test_seasonal_k(y, k, n=10)
     return elss
 end
 
+#_, y = get_airp()
+#p = plot(y, label="air passenger")
+
 function test_air_pass(n=10)
     _, y = get_airp()
     y = diff(y, dims=1)
@@ -272,7 +275,7 @@ function test_air_pass(n=10)
     display(p)
 end
 
-test_air_pass()
+#test_air_pass()
 
 function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     elbo_lg = zeros(n)
