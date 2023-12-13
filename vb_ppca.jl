@@ -712,7 +712,7 @@ function timing_exp_ppca(N_s = 200, N_end=2200, n=8, t_mcmc=nothing)
 	return p
 end
 
-p_ = timing_exp_ppca(200, 3000, 8, t_mcmc)
+#p_ = timing_exp_ppca(200, 3000, 8, t_mcmc)
 
 # hmc_chain, _, exp_np, x_true, y = comp_mcmc_vb()
 # T = 500

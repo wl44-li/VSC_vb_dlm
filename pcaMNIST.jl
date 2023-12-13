@@ -25,11 +25,9 @@ function compareDigits(train_y, train_labels, M, dA, dB)
     yB = hcat([vcat(float.(imB[:, :, t])...) for t in 1:size(imB, 3)]...)
 
     xA, xB = M'*yA, M'*yB
-    # default(ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
-    #         legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter(xA[1, :], xA[2, :], c=:red, label="Digit $(dA)", ms=0.8, msw=0, xlims=(-5, 12.5), ylims=(-7.5, 7.5),
+    scatter(xA[1, :], xA[2, :], c=:red, label="Digit $(dA)", ms=1.5, msw=0,
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    scatter!(xB[1, :], xB[2, :], c=:blue, label="Digit $(dB)", ms=0.8, msw=0)
+    scatter!(xB[1, :], xB[2, :], c=:blue, label="Digit $(dB)", ms=1.5, msw=0)
 end
 
 function compare_0(train_y, train_labels, M)
@@ -56,7 +54,7 @@ function plot_number(train_y, train_labels, number, M)
     legend = :topright, xlabel="PC 1", ylabel="PC 2")
 end
 
-function test_MNIST(test_prop=100, standardise = true, method = "pca")
+function test_MNIST(test_prop=100, standardise=true, method="pca")
     train_y, train_labels = MNIST(split=:train)[:]
 
     T = length(train_labels)
@@ -82,7 +80,9 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
 
     if method == "mle"
         mle = MultivariateStats.fit(PPCA, y; maxoutdim=2)
-        M = projection(mle)
+        M = svd(mle.W[:, 1:2]).U
+
+        #M = projection(mle)
     end
 
     """
@@ -100,7 +100,7 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     # end
 
     if method == "vbem"
-        C = vb_ppca_k2(y, 100, false, debug=false)
+        C, _, _, _, _ = vb_ppca_k2(y, 100, false, debug=false)
         M = svd(C).U
     end
 
@@ -113,27 +113,33 @@ function test_MNIST(test_prop=100, standardise = true, method = "pca")
     display(p)
 end
 
-train_y, train_labels = MNIST(split=:train)[:]
-#train_y, train_labels = train_y[:, :, 1:20000], train_labels[1:20000]
-T = size(train_y, 3)
-y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
+test_MNIST(10, true)
 
-# 1s
-img_1 = train_y[:, :, findall(x -> x == 1, train_labels)]
-y_1s = hcat([vcat(float.(img_1[:, :, t])...) for t in 1:size(img_1, 3)]...)
-println("dimension of 1s (MNIST): ", size(y_1s))
+#test_MNIST(10, true, "mle")
 
-img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
-y_0s = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
-println("dimension of 0s (MNIST): ", size(y_0s))
+#test_MNIST(10, true, "vbem")
 
-"""
-Simple Data visualisation experiment, separate 0 and 1 from MNIST
-- compare VB with MLE baseline
-"""
+# train_y, train_labels = MNIST(split=:train)[:]
+# #train_y, train_labels = train_y[:, :, 1:20000], train_labels[1:20000]
+# T = size(train_y, 3)
+# y = hcat([vcat(Float64.(train_y[:, :, t])...) for t in 1:T]...)
 
-y_st = zscore(y_1s, 1)
-y_st_0 = zscore(y_0s, 1)
+# # 1s
+# img_1 = train_y[:, :, findall(x -> x == 1, train_labels)]
+# y_1s = hcat([vcat(float.(img_1[:, :, t])...) for t in 1:size(img_1, 3)]...)
+# println("dimension of 1s (MNIST): ", size(y_1s))
+
+# img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
+# y_0s = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
+# println("dimension of 0s (MNIST): ", size(y_0s))
+
+# """
+# Simple Data visualisation experiment, separate 0 and 1 from MNIST
+# - compare VB with MLE baseline
+# """
+
+# y_st = zscore(y_1s, 1)
+# y_st_0 = zscore(y_0s, 1)
 
 function show_pca(y_1, y_0)
     pca = MultivariateStats.fit(PCA, y_1; maxoutdim=2)
@@ -150,7 +156,7 @@ function show_pca(y_1, y_0)
     display(p_pca)
 end
 
-show_pca(y_st, y_st_0)
+#show_pca(y_st, y_st_0)
 
 function show_mle(y_st, y_st_0)
     mle_std = MultivariateStats.fit(PPCA, y_st; maxoutdim=2)
@@ -227,34 +233,3 @@ end
 #mnist_vb(y_st, y_st_0, 5, 505, 100)
 
 #show_vb_mnist_progress(y_st, y_st_0, 5, 505, 100)
-
-# function test_vb_ppca(y, n=10)
-#     plots = []
-#     elss = []
-# 	p_elbo = plot()
-
-#     for rep in 1:n
-
-#         C, els = missing, missing
-#         if rep%2 == 0
-#             C, _, els = vb_ppca_k2(y, 2000, false, mode = "mle")
-
-#         else
-#             C, _, els = vb_ppca_k2(y, 2000, false, mode = "random")
-#         end
-#         M_vb = svd(C).U
-#         x_1s_vb2 = M_vb' * y_st
-
-#         push!(plots, scatter(x_1s_vb2[2, :], x_1s_vb2[1, :], c=:black, label="Digit 1 (VB-std)", ms=1.5, msw=0, 
-#         legend = :topleft, xlabel="PC 1", ylabel="PC 2"))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
-#         plot!(p_elbo, els, label="", ylabel="ELBO", xlabel="Iterations")	
-#         push!(elss, els)
-#         println("ELBOs end: ", els[end])
-#     end
-
-#     display(p_elbo)
-
-#     return plots, elss
-# end
-
-# plot_1s, elss = test_vb_ppca(y_st, 20)
