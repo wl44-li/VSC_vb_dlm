@@ -637,35 +637,40 @@ function gen_plots(mode="hmc", ground_truths=nothing)
 	display(p2)
 end
 
-#gen_plots("hmc", [2.0, 1.0, 0.5])
+#gen_plots("hmc", [1.0, 1.0, 0.5])
 
-gen_plots("nuts", [2.0, 1.0, 0.5])
+#gen_plots("nuts", [2.0, 1.0, 0.5])
 
-function timing_turing(N_s = 600, N_end=2200)
+function timing_turing(N_s = 600, N_end=2200, n=5)
 	t_mcmc = []
 	C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([2.0, 2.0])
 
-	for i in range(N_s, N_end, 5)
+	for i in range(N_s, N_end, n)
 		y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, Int(i))
 		t_mcmc_i = @elapsed hmc_ppca(y, 1)
 		push!(t_mcmc, t_mcmc_i)
+		println("$i: ", log(t_mcmc_i))
 	end
 
-	xs = range(N_s, N_end, 5)
-
-	p = scatter(xs, log.(t_mcmc), label="mcmc")
-	xlabel!(p, "Number of data points (N)")
-	ylabel!(p, "Running time (seconds)")
-	display(p)
-	return p, xs, t_mcmc
+	return log.(t_mcmc)
 end
 
-#p_mcmc, xs, t_mcmc = timing_turing()
+"""
+200.0: 4.454095941026894
+600.0: 6.246164485354498
+1000.0: 7.478689742708156
+1400.0: 8.147395293793162
+1800.0: 8.583157439848277
+2200.0: 8.877900069585126
+2600.0: 9.090655853105782
+3000.0: 9.388455214042436
+"""
+#ts_mcmc = timing_turing(200, 3000, 8)
 
-t_mcmc = [6.06, 7.11, 7.83, 8.37, 8.71]
+t_mcmc = [4.454, 6.246, 7.478, 8.147, 8.583, 8.878, 9.090, 9.388]
 
-function timing_exp_ppca(N_s = 200, N_end=2200, t_mcmc=nothing)
+function timing_exp_ppca(N_s = 200, N_end=2200, n=8, t_mcmc=nothing)
 	t_vb = []
 	C_d2k1 = reshape([1.0, 0.5], 2, 1)
     R_2 = Diagonal([2.0, 2.0])
@@ -677,21 +682,28 @@ function timing_exp_ppca(N_s = 200, N_end=2200, t_mcmc=nothing)
 	Σ_0 = Matrix{Float64}(I, K, K)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	for i in range(N_s, N_end, 6)
+	for i in range(N_s, N_end, n)
 		y, _ = gen_data_ppca([0.0], C_d2k1, [1.0], R_2, Int(i))
-		t_vb_i = @elapsed vb_ppca_c(y, hpp, false, init="mle")
-		push!(t_vb, t_vb_i)
+
+		if i == N_s
+			t_vb_i = @elapsed vb_ppca_c(y, hpp, false, init="mle")
+		end
+
+		t_vb_avg = 0
+		for _ in 1:10
+			t_vb_i = @elapsed vb_ppca_c(y, hpp, false, init="mle")
+			t_vb_avg += t_vb_i
+		end
+		push!(t_vb, t_vb_avg/10)
 	end
 
-	xs = range(N_s, N_end, 6)
-	#p = scatter(xs, log.(t_vb), label="vi")
-	p = scatter(xs[2:end], log.(t_vb)[2:end], label="vi", color=:orange)
-	plot!(xs[2:end], log.(t_vb)[2:end], label="", color=:orange, lw=1)
+	xs = range(N_s, N_end, n)
+	p = scatter(xs, log.(t_vb), label="vi", color=:orange, ms=2)
+	plot!(xs, log.(t_vb), label="", color=:orange, lw=1)
 	
 	if t_mcmc !== nothing
-		scatter!(p, xs[2:end], t_mcmc, label="mcmc", color=:blue)
-		plot!(p, xs[2:end], t_mcmc, label="", color=:blue, lw=1)
-
+		scatter!(p, xs, t_mcmc, label="mcmc", color=:blue, ms=2)
+		plot!(p, xs, t_mcmc, label="", color=:blue, lw=1)
 	end
 
 	xlabel!(p, "Number of data points (N)")
@@ -700,8 +712,7 @@ function timing_exp_ppca(N_s = 200, N_end=2200, t_mcmc=nothing)
 	return p
 end
 
-#p_vb = timing_exp_ppca(200, 2200, t_mcmc)
-
+p_ = timing_exp_ppca(200, 3000, 8, t_mcmc)
 
 # hmc_chain, _, exp_np, x_true, y = comp_mcmc_vb()
 # T = 500
