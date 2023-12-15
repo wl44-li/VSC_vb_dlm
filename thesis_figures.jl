@@ -7,32 +7,33 @@ function gibbs_sampling(n_samples)
     x, y = 4.0, 4.0
     samples[1, :] = [x, y]
     for i in 2:n_samples+1
-        x = randn() + y  # Sampling from conditional distribution P(X|Y)
-        y = randn() + x  # Sampling from conditional distribution P(Y|X)
+        if i % 2 == 0
+            x = randn() + y
+        else  # Sampling from conditional distribution P(X|Y)
+            y = randn() + x
+        end  # Sampling from conditional distribution P(Y|X)
         samples[i, :] = [x, y]
     end
+
     return samples
 end
 
 function gibbs_plot()
     # Generate samples using Gibbs Sampling
-    n_samples = 25
+    n_samples = 30
     samples = gibbs_sampling(n_samples)
-
-    # Create a plot to show the zig-zag paths
     p = plot()
 
     # Overlay the true bivariate normal distribution as contour lines
     x = range(-5, stop=5, length=50)
     y = range(-5, stop=5, length=50)
     z = [pdf(MvNormal([0.0, 0.0], [2.0 0.0; 0.0 2.0]), [x[i], y[j]]) for i in 1:length(x), j in 1:length(y)]
+    
     contour!(p, x, y, z, color=:grey, alpha=0.5)
 
-    # Plot the Gibbs samples as blue dots and connect them with red lines
     plot!(p, samples[:,1], samples[:,2], seriestype=:scatter, color=:blue, ms=2, label="Gibbs Samples")
     plot!(p, samples[:,1], samples[:,2], linecolor=:red, linewidth=0.5, linealpha=0.5, label="Markov Chain")
 
-    # Display the plot
     display(p)
 end
 

@@ -47,43 +47,36 @@ function plot_number(train_y, train_labels, number, mode="pca")
     y_n = hcat([vcat(float.(img_n[:, :, t])...) for t in 1:size(img_n, 3)]...)
     y_n = zscore(y_n, 1)
 
+    img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
+    y_0 = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
+    y_0 = zscore(y_0, 1)
+
+    y_sum = hcat(y_n, y_0)
+
     x_n = missing
     x_0 = missing
     p = missing
 
     if mode == "pca"
-        pca = MultivariateStats.fit(PCA, y_n; maxoutdim=2)
+        pca = MultivariateStats.fit(PCA, y_sum; maxoutdim=2)
         M_pca = projection(pca)
         x_n = M_pca' * y_n
-        p = scatter(x_n[1, :], x_n[2, :], c=:red, label="Digit $number", ms=1.5, msw=0, 
+        p = scatter(x_n[2, :], x_n[1, :], c=:red, label="Digit $number", ms=1.5, msw=0, 
         legend = :topright, xlabel="PC 1", ylabel="PC 2")
+        x_0 = M_pca' * y_0
+        scatter!(x_0[2, :], x_0[1, :], c=:blue, label="Digit 0", ms=1.5, msw=0)
     end
 
     if mode == "ppca"
-        C, _, _ = vb_ppca_k2(y_n, 1, false, mode="mle")
+        C, _, _ = vb_ppca_k2(y_sum, 2, false, mode="mle")
         M_vb = svd(C).U
         x_n = M_vb' * y_n
         p = scatter(x_n[2, :], x_n[1, :], c=:red, label="Digit $number", ms=1.5, msw=0, 
         legend = :topright, xlabel="PC 1", ylabel="PC 2")
-    end
-
-    img_0 = train_y[:, :, findall(x -> x == 0, train_labels)]
-    y_0 = hcat([vcat(float.(img_0[:, :, t])...) for t in 1:size(img_0, 3)]...)
-    y_0 = zscore(y_0, 1)
-
-    if mode == "pca"
-        pca = MultivariateStats.fit(PCA, y_0; maxoutdim=2)
-        M_pca = projection(pca)
-        x_0 = M_pca' * y_0
-        scatter!(x_0[1, :], x_0[2, :], c=:blue, label="Digit 0", ms=1.5, msw=0)
-    end
-
-    if mode == "ppca"
-        C, _, _ = vb_ppca_k2(y_0, 1, false, mode="mle")
-        M_vb = svd(C).U
         x_0 = M_vb' * y_0
         scatter!(x_0[2, :], x_0[1, :], c=:blue, label="Digit 0", ms=1.5, msw=0)
     end
+
 
     return p
 end
@@ -147,17 +140,17 @@ end
 #test_MNIST(100, true, "vbem")
 
 train_y, train_labels = MNIST(split=:train)[:]
-train_y, train_labels = train_y[:, :, 1:30000], train_labels[1:30000]
+train_y, train_labels = train_y[:, :, 1:60000], train_labels[1:60000]
 
 # plots_pca = []
-# for k in 1:9
+# for k in [1, 6, 8, 9]
 #     push!(plots_pca, plot_number(train_y, train_labels, k, "pca"))
 # end
 # p_pca = plot(plots_pca..., size = (1600, 1000), margin = 5mm)
 # display(p_pca)
 
 plots_ppca = []
-for k in 1:9
+for k in [1, 6, 8, 9]
     push!(plots_ppca, plot_number(train_y, train_labels, k, "ppca"))
 end
 p_ppca = plot(plots_ppca..., size = (1600, 1000), margin = 5mm)

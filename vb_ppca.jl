@@ -221,8 +221,8 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
 		println("\t--- VB PPCA using MLE initilaization ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
-		σ²_init = M_mle.σ² .* (1 + randn() * 0.2) 
-		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.2) 
+		σ²_init = M_mle.σ² .* (1 + randn() * 0.3) 
+		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.3) 
 
 		R = diagm(ones(P) .* σ²_init)
 		e_R⁻¹ = inv(R)

@@ -430,7 +430,7 @@ function update_ab(hpp::Priors_ll, qθ)
 	return a_r, b_r, a_q, b_q
 end
 
-function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=500, tol=1e-4; init="gibbs", debug=false)
+function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=1000, tol=1e-4; init="gibbs", debug=false)
 	"""
 	Random initilisation
 
@@ -492,7 +492,19 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 
 	if init == "gibbs_conver"
 		println("\t--- Using Gibbs Convergence initilaization ---")
-		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1500, 0, 1)
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1000, 0, 1)
+		r_init, q_init = sr[end], sq[end]
+		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+		if debug
+			println("Q_init: ", q_init)
+			println("R_init: ", r_init)
+			println("w_c, w_a, s_c, s_a :", hss)
+		end
+	end
+
+	if init == "gibbs_n"
+		println("\t--- Using Gibbs Convergence initilaization ---")
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 500, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 		if debug
@@ -549,7 +561,8 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=50
 		end
 		
 		if (hp_learn)
-			if (i%5 == 0) 
+			# what is the optimal ?
+			if (i%250 == 0) 
 				a_r, b_r, a_q, b_q = update_ab(hpp, qθ)
 				hpp = Priors_ll(a_r, b_r, a_q, b_q, μs_0, σs_s0)
 				#hpp = Priors_ll(a_r, b_r, a_q, b_q, hpp.μ_0, hpp.σ_0)
@@ -740,6 +753,47 @@ end
 # plot!(p, 1871:1970, y, color=:grey, lw=1, label="")
 # ylabel!(p, "Level")
 # display(p)
+
+function nile_init_tests(n=20, hyper=false)
+	modes = ["mle", "obs", "gibbs", "gibbs_n", "gibbs_conver"]
+	y = get_Nile()
+	y = vec(y)
+	y = Float64.(y)
+	elbos_mle = zeros(n)
+	elbos_gi = zeros(n)
+	elbos_gi_100 = zeros(n)
+	elbos_gi_cov = zeros(n)
+	hpp_ll = Priors_ll(2, 1e-5, 2, 1e-5, 0.0, 1e7)
+
+	for i in 1:n
+		for m in modes
+			_, _, els, _ = vb_ll_c(y, hpp_ll, hyper, init=m)
+
+			if m == "mle"
+				elbos_mle[i] = els[end]
+			end
+
+			if m == "gibbs"
+				elbos_gi[i] = els[end]
+			end
+
+			if m == "gibbs_n"
+				elbos_gi_100[i] = els[end]
+			end
+
+			if m == "gibbs_conver"
+				elbos_gi_cov[i] = els[end]
+			end
+		end
+	end
+
+	println("MLE :", maximum(elbos_mle), "  ", mean(elbos_mle))
+	println("Gibbs 1 :", maximum(elbos_gi), "  ", mean(elbos_gi))
+	println("Gibbs 50 :", maximum(elbos_gi_100), "  ", mean(elbos_gi_100))
+	println("Gibbs 100 :", maximum(elbos_gi_cov), "  ", mean(elbos_gi_cov))
+end
+
+nile_init_tests(50, true)
 
 function test_nile(n=10)
 	y = get_Nile()
