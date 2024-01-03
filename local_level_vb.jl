@@ -85,11 +85,6 @@ function test_rq(rnd, T=100)
 	println("Sample q = $q")
 end
 
-# test_rq(123)
-# test_rq(123, 1000)
-# test_rq(12)
-# test_rq(12, 1000)
-
 function forward_fil(y, A, C, R, Q, m_0, c_0)
 	T = length(y)
     ms = Vector{Float64}(undef, T+1)
@@ -152,9 +147,6 @@ function test_ffbs(rnd, T=100)
 	display(p)
 end
 
-# test_ffbs(111, 20)
-# test_ffbs(111, 100)
-
 function gibbs_ll(y, a, c, mcmc=3000, burn_in=100, thinning=1)
 	T = length(y)
 	m_0, c_0 = 0.0, 1e7  # Prior DLM with R setting
@@ -212,22 +204,8 @@ function test_gibbs_ll(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show
 	end
 
 	if show_plot
-		# p = plot((s_x[1:end, 1:200]), label = "", title="MCMC Trace Plot x[0:T]")
-		# display(p)
-
-		 # Agrees with DLM with R example !
 		p = plot(x_std, label = "", title="MCMC x std")
 		display(p)
-
-		# p = plot_CI_ll(x_m, x_std, x_true)
-		# title!(p, "MCMC latent x inference")
-		# display(p)
-
-		# p_q = plot(s_q, title="trace q")
-		# display(p_q)
-
-		# p_r = plot(s_r, title="trace r")
-		# display(p_r)
 
 		p_r_d = density(R_chain)
 		title!(p_r_d, "MCMC R")
@@ -435,9 +413,8 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	Random initilisation
 
 	- MLE results r, q, randomness with normal(mle_mean, mle_std)
-	- Gibbs Run 1 & 1500 (Nile River Convergence)
+	- Gibbs 1-step & n-step
 	- Observation variance 
-
 	"""
 
 	E_τ_r, E_τ_q  = missing, missing
@@ -446,18 +423,17 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	avg_log_score = missing
 
 	if init == "mle"
-		println("\t--- Using MLE initilaization ---")
+		# println("\t--- Using MLE initilaization ---")
 		model = StateSpaceModels.LocalLevel(y)
 		StateSpaceModels.fit!(model)	
 		results = model.results
 		mle_ms = results.coef_table.coef
 		mle_sterrs = results.coef_table.std_err
-		# println(mle_ms, mle_sterrs)
 
 		mle_estimate_R = mle_ms[1] # MLE estimate for R
 		mle_estimate_Q = mle_ms[2] # MLE estimate for Q
-		se_R = mle_sterrs[1] # Standard error for R
-		se_Q = mle_sterrs[2] # Standard error for Q
+		se_R = mle_sterrs[1]  # Standard error for R
+		se_Q = mle_sterrs[2]  # Standard error for Q
 
 		# For R
 		alpha_R = (mle_estimate_R / se_R)^2
@@ -469,7 +445,10 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 		theta_Q = se_Q^2 / mle_estimate_Q
 		q_init = rand(Gamma(alpha_Q, theta_Q))
 
+		# r_init = (1 + randn() * 0.3) * mle_estimate_R
+		# q_init = (1 + randn() * 0.3) * mle_estimate_Q
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
+		
 		if debug
 			println("Q_init: ", q_init)
 			println("R_init: ", r_init)
@@ -478,7 +457,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	end
 
 	if init == "gibbs"
-		println("\t--- Using Gibbs 1-step initilaization ---")
+		# println("\t--- Using Gibbs 1-step initilaization ---")
 		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
@@ -491,8 +470,8 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	end
 
 	if init == "gibbs_conver"
-		println("\t--- Using Gibbs Convergence initilaization ---")
-		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 1000, 0, 1)
+		# println("\t--- Using Gibbs Convergence initilaization ---")
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 20, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 		if debug
@@ -503,8 +482,8 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	end
 
 	if init == "gibbs_n"
-		println("\t--- Using Gibbs Convergence initilaization ---")
-		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 500, 0, 1)
+		# println("\t--- Using Gibbs Convergence initilaization ---")
+		_, sq, sr = gibbs_ll(y, 1.0, 1.0, 10, 0, 1)
 		r_init, q_init = sr[end], sq[end]
 		hss, _, _, _ = vb_e_ll(y, 1.0, 1.0, 1/r_init, 1/q_init, hpp)
 		if debug
@@ -529,7 +508,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 	end
 
 	if init == "fixed"
-		println("\t--- Warning: Fixed Init (Debugging Purpose Only) ---")
+		# println("\t--- Warning: Fixed Init (Debugging Purpose Only) ---")
 		hss = HSS_ll(1.0, 1.0, 1.0, 1.0)
 	end
 
@@ -554,15 +533,14 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 		end
 
 		if abs(elbo - elbo_prev) < tol
-			println("\tStopped at iteration: $i")
+			# println("\tStopped at iteration: $i")
 			avg_log_score = log_z / length(y)
 			el_s = el_s[1:i]
             break
 		end
 		
 		if (hp_learn)
-			# what is the optimal ?
-			if (i%250 == 0) 
+			if (i%10 == 0) 
 				a_r, b_r, a_q, b_q = update_ab(hpp, qθ)
 				hpp = Priors_ll(a_r, b_r, a_q, b_q, μs_0, σs_s0)
 				#hpp = Priors_ll(a_r, b_r, a_q, b_q, hpp.μ_0, hpp.σ_0)
@@ -573,7 +551,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 
 		if (i == max_iter)
 			avg_log_score = log_z / length(y)
-			println("\tWarning: VB have not necessarily converged at $max_iter iterations")
+			# println("\tWarning: VB have not necessarily converged at $max_iter iterations")
 		end
 	end
 
@@ -607,14 +585,43 @@ function plot_rq_CI(a_q, b_q, mcmc_s, true_param=nothing; out_range_vi=false)
 	return τ_
 end
 
+function compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, vb_means)
+    # Check for length mismatches
+    if length(mcmc_ms) != length(mcmc_stds) || length(mcmc_ms) != length(vb_means)
+        error("Input arrays must be of the same length")
+    end
 
-"""
-plot 95% credible interval of latent level component
+    # Initialize a counter for the number of VB estimates within the credible intervals
+    count_in_interval = 0
 
-max_T display the maximum length of latent sequence to be plotted (zoomed-in view)
-"""
+    # Loop over each set of parameters (mean and std of MCMC, mean of VB)
+    for (mcmc_m, mcmc_std, vb_mean) in zip(mcmc_ms, mcmc_stds, vb_means)
+        
+		# Define the 95% (z=1.96) credible interval for the MCMC distribution
+		# Define the 90% (z=1.645) credible interval for the MCMC distribution
+
+		lower_bound = mcmc_m - 1.645 * mcmc_std
+        upper_bound = mcmc_m + 1.645 * mcmc_std
+
+		#lower_bound = mcmc_m - 1 * mcmc_std
+        #upper_bound = mcmc_m + 1 * mcmc_std
+
+        # Check if the VB mean is within this interval
+        if lower_bound <= vb_mean <= upper_bound
+            count_in_interval += 1
+        end
+    end
+
+    # Calculate the percentage
+    percentage = (count_in_interval / length(vb_means)) * 100
+
+    # Return percentage with 3 significant figures
+    return round(percentage, digits=3)
+end
 
 function plot_CI_ll(μ_s, stds, x_true=nothing, T_s=1, T_end=30; nile_test=false)
+	#plot 95% credible interval of latent level component
+	#max_T display the maximum length of latent sequence to be plotted (zoomed-in view)
 	# μ_s :: vector of normal mean
 	# stds :: vector of corresponding standard derivation
 	μ_s = μ_s[T_s:T_end]
@@ -715,8 +722,6 @@ function test_Nile_ffbs()
 	display(p)
 end
 
-#test_Nile_ffbs()
-
 function test_Nile_level()
 	y = get_Nile()
 	y = vec(y)
@@ -747,53 +752,351 @@ function test_Nile_level()
 	return p
 end
 
-# p = test_Nile_level()
-# y = Float64.(vec(get_Nile()))
-# scatter!(p, 1871:1970, y, label="Data y_t", marker = :circle, ms=2.5, markercolor = :white, markerstrokecolor = :grey, markerstrokewidth = 0.5)
-# plot!(p, 1871:1970, y, color=:grey, lw=1, label="")
-# ylabel!(p, "Level")
-# display(p)
+function get_nile_mcmc()
+	y = Float64.(vec(get_Nile()))
+	Random.seed!(10)
+	mcmc_ms, mcmc_stds, sr, sq = test_gibbs_ll(y, nothing, 1500, 0, 1)
 
-function nile_init_tests(n=20, hyper=false)
-	modes = ["mle", "obs", "gibbs", "gibbs_n", "gibbs_conver"]
+	return mcmc_ms, mcmc_stds, mean(sr), mean(sq)
+end
+
+function nile_init_tests(mcmc_ms, mcmc_stds, R, Q, error = "MSE", n=20, hyper=false)
+	modes = ["obs", "mle", "gibbs", "gibbs_n", "gibbs_conver"]
 	y = get_Nile()
 	y = vec(y)
 	y = Float64.(y)
 	elbos_mle = zeros(n)
+	mle_percents = zeros(n)
+
 	elbos_gi = zeros(n)
+	gi_percents = zeros(n)
+
+	elbos_obs = zeros(n)
+	obs_percents = zeros(n)
+
 	elbos_gi_100 = zeros(n)
+	gi_100_percents = zeros(n)
+
 	elbos_gi_cov = zeros(n)
-	hpp_ll = Priors_ll(2, 1e-5, 2, 1e-5, 0.0, 1e7)
+	gi_cov_percents = zeros(n)
+
+	hpp_ll = Priors_ll(2, 1e-3, 2, 1e-3, 0.0, 1e7)
+
+	sum_mle_q_error = zeros(n)
+	sum_mle_r_error = zeros(n)
+
+	sum_gi_q_error = zeros(n)
+	sum_gi_r_error = zeros(n)
+
+	sum_obs_q_error = zeros(n)
+	sum_obs_r_error = zeros(n)
+
+	sum_gi_100_q_error = zeros(n)
+	sum_gi_100_r_error = zeros(n)
+
+	sum_gi_cov_q_error = zeros(n)
+	sum_gi_cov_r_error = zeros(n)
 
 	for i in 1:n
 		for m in modes
-			_, _, els, _ = vb_ll_c(y, hpp_ll, hyper, init=m)
-
-			if m == "mle"
-				elbos_mle[i] = els[end]
-			end
+			r, q, els, qθ = vb_ll_c(y, hpp_ll, hyper, 500, 0.5, init=m)
+			μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+			μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 
 			if m == "gibbs"
 				elbos_gi[i] = els[end]
+				gi_percents[i] = compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s)
+
+				if error == "MSE"
+					sum_gi_q_error[i] = (Q - q)^2
+					sum_gi_r_error[i]= (R - r)^2
+				else
+					sum_gi_q_error[i] = abs(Q - q)
+					sum_gi_r_error[i]= abs(R - r)
+				end
 			end
 
+			if m == "mle"
+				elbos_mle[i] = els[end]
+				mle_percents[i] = compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s)
+
+				if error == "MSE"
+					sum_mle_q_error[i] = (Q - q)^2
+					sum_mle_r_error[i]= (R - r)^2
+				else
+					sum_mle_q_error[i]= abs(Q - q)
+					sum_mle_r_error[i]= abs(R - r)
+				end
+			end
+
+
+			if m == "obs"
+				elbos_obs[i] = els[end]
+				obs_percents[i] = compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s)
+				if error == "MSE"
+					sum_obs_q_error[i]= (Q - q)^2
+					sum_obs_r_error[i]= (R - r)^2
+				else
+					sum_obs_q_error[i] = abs(Q - q)
+					sum_obs_r_error[i]= abs(R - r)
+				end
+
+			end
 			if m == "gibbs_n"
 				elbos_gi_100[i] = els[end]
+				gi_100_percents[i] = compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s)
+				if error == "MSE"
+					sum_gi_100_q_error[i]= (Q - q)^2
+					sum_gi_100_r_error[i]= (R - r)^2
+				else
+					sum_gi_100_q_error[i]= abs(Q - q)
+					sum_gi_100_r_error[i]= abs(R - r)
+				end
 			end
 
 			if m == "gibbs_conver"
 				elbos_gi_cov[i] = els[end]
+				gi_cov_percents[i] = compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s)
+				if error == "MSE"
+					sum_gi_cov_q_error[i]= (Q - q)^2
+					sum_gi_cov_r_error[i]= (R - r)^2
+				else
+					sum_gi_cov_q_error[i]= abs(Q - q)
+					sum_gi_cov_r_error[i]= abs(R - r)
+				end
 			end
 		end
 	end
 
-	println("MLE :", maximum(elbos_mle), "  ", mean(elbos_mle))
-	println("Gibbs 1 :", maximum(elbos_gi), "  ", mean(elbos_gi))
-	println("Gibbs 50 :", maximum(elbos_gi_100), "  ", mean(elbos_gi_100))
-	println("Gibbs 100 :", maximum(elbos_gi_cov), "  ", mean(elbos_gi_cov))
+	println("\nELBOs: ")
+	println("MLE :", maximum(elbos_mle))
+	println("Random :", maximum(elbos_obs))
+	println("Gibbs 1 (Default) :", maximum(elbos_gi))
+	println("Gibbs n :", maximum(elbos_gi_100))
+	println("Gibbs 2n :", maximum(elbos_gi_cov))
+
+	# println("MLE Q $error: ", sum_mle_q_error/n)
+	# println("MLE R $error: ", sum_mle_r_error/n)
+	# println("Rand Q $error: ", sum_obs_q_error/n)
+	# println("Rand R $error: ", sum_obs_r_error/n)
+	# println("Gibbs 1 Q $error: ", sum_gi_q_error/n)
+	# println("Gibbs 1 R $error: ", sum_gi_r_error/n)
+	# println("Gibbs n Q $error: ", sum_gi_100_q_error/n)
+	# println("Gibbs n R $error: ", sum_gi_100_r_error/n)
+	# println("Gibbs 2n Q $error: ", sum_gi_cov_q_error/n)
+	# println("Gibbs 2n R $error: ", sum_gi_cov_r_error/n)
+
+	println("\n Latent State Bound by 90% CI of MCMC, mean, min, max")
+	println("MLE : ", mean(mle_percents), " ", minimum(mle_percents), " ", maximum(mle_percents))
+	println("Random : ", mean(obs_percents), " ", minimum(obs_percents), " ", maximum(obs_percents))
+	println("Gibbs 1 (Default) : ", mean(gi_percents), " ", minimum(gi_percents), " ", maximum(gi_percents))
+	println("Gibbs n :", mean(gi_100_percents),  " ", minimum(gi_100_percents),  " ",  maximum(gi_100_percents))
+	println("Gibbs 2n :", mean(gi_cov_percents),  " ", minimum(gi_cov_percents),   " ", maximum(gi_cov_percents))
+
+	println("\nModel Params")
+	mle_index = argmax(elbos_mle)
+	#println("MLE % ", mle_percents[mle_index])
+	println("MLE Q error: ", sum_mle_q_error[mle_index])
+	println("MLE R error: ", sum_mle_r_error[mle_index])
+
+	obs_index = argmax(elbos_obs)
+	println("Rand Q error: ", sum_mle_q_error[obs_index])
+	println("Rand R error: ", sum_mle_r_error[obs_index])
+
+	gi_index = argmax(elbos_gi)
+	# println("Gibbs Default % ", gi_percents[gi_index])
+	println("Gi 1 Q error: ", sum_gi_q_error[gi_index])
+	println("Gi 1 R error: ", sum_gi_r_error[gi_index])
+
+	gi_100_index = argmax(gi_100_percents)
+	#println("Gibbs n % ", gi_100_percents[gi_100_index])
+	println("Gi n Q error: ", sum_gi_100_q_error[gi_100_index])
+	println("Gi n R error: ", sum_gi_100_r_error[gi_100_index])
+	
+	gi_cov_index = argmax(gi_cov_percents)
+	#println("Gibbs 2n % ", gi_cov_percents[gi_cov_index])
+	println("Gi 2n Q error: ", sum_gi_cov_q_error[gi_cov_index])
+	println("Gi 2n R error: ", sum_gi_cov_r_error[gi_cov_index])
 end
 
-nile_init_tests(50, true)
+function sim_init_tests(n=10, error="MSE")
+	R = 30.0
+	Q = 10.0
+	Random.seed!(123)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 100.0, 100.0, 200)
+	mcmc_ms, mcmc_stds = test_gibbs_ll(y, x_true, 10000, 5000, 1)
+
+	hpp_ll = Priors_ll(2, 1, 2, 1, 0.0, 1e7)
+	modes = ["mle", "obs", "gibbs", "gibbs_n", "gibbs_conver"]
+
+	elbos_mle = zeros(n)
+	errors_mle = []
+	mle_percents = []
+
+	elbos_gi = zeros(n)
+	errors_gi = []
+	gi_percents = []
+
+	elbos_obs = zeros(n)
+	errors_obs = []
+	obs_percents = []
+
+	elbos_gi_100 = zeros(n)
+	errors_gi_100 = []
+	gi_100_percents = []
+
+	elbos_gi_cov = zeros(n)
+	errors_gi_cov = []
+	gi_con_percents = []
+
+	sum_mle_q_error = 0
+	sum_mle_r_error = 0
+
+	sum_gi_q_error = 0
+	sum_gi_r_error = 0
+
+	sum_obs_q_error = 0
+	sum_obs_r_error = 0
+
+	sum_gi_100_q_error = 0
+	sum_gi_100_r_error = 0
+
+	sum_gi_cov_q_error = 0
+	sum_gi_cov_r_error = 0
+
+	for i in 1:n
+		for m in modes
+			r, q, els, _ = vb_ll_c(y, hpp_ll, false, 200, 0.1, init=m)
+			μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+			μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
+			
+			if m == "gibbs"
+				elbos_gi[i] = els[end]
+
+				if error == "MSE"
+					sum_gi_q_error += (Q - q)^2
+					sum_gi_r_error += (R - r)^2
+					push!(errors_gi, error_metrics(x_true[2:end], μs_s[2:end])[1])
+				else
+					sum_gi_q_error += abs(Q - q)
+					sum_gi_r_error += abs(R - r)
+					push!(errors_gi, error_metrics(x_true[2:end], μs_s[2:end])[2])
+				end
+				push!(gi_percents, compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds, μs_s))
+
+				if i == n
+					println("\nGibbs 1 $error: ", mean(errors_gi))
+					println("Gibbs 1 Q $error: ", sum_gi_q_error/n)
+					println("Gibbs 1 R $error: ", sum_gi_r_error/n)
+					#println("\t mean %: ", mean(gi_percents))
+				end
+			end
+
+			if m == "mle"
+				elbos_mle[i] = els[end]
+
+				if error == "MSE"
+					sum_mle_q_error += (Q - q)^2
+					sum_mle_r_error += (R - r)^2
+					push!(errors_mle, error_metrics(x_true[2:end], μs_s[2:end])[1])
+				else
+					sum_mle_q_error += abs(Q - q)
+					sum_mle_r_error += abs(R - r)
+					push!(errors_mle, error_metrics(x_true[2:end], μs_s[2:end])[2])
+				end
+
+				push!(mle_percents, compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds,μs_s))
+
+				if i == n
+					println("\nMLE mean $error: ", mean(errors_mle))
+					println("MLE Q $error: ", sum_mle_q_error/n)
+					println("MLE R $error: ", sum_mle_r_error/n)
+					#println("\t mean %: ", mean(mle_percents))
+				end
+			end
+
+			if m == "obs"
+				elbos_obs[i] = els[end]
+
+				if error == "MSE"
+					sum_obs_q_error += (Q - q)^2
+					sum_obs_r_error += (R - r)^2
+					push!(errors_obs, error_metrics(x_true[2:end], μs_s[2:end])[1])
+				else
+					sum_obs_q_error += abs(Q - q)
+					sum_obs_r_error += abs(R - r)
+					push!(errors_obs, error_metrics(x_true[2:end], μs_s[2:end])[2])
+				end
+
+				push!(obs_percents, compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds,μs_s))
+
+				if i == n
+					println("\nrand $error: ", mean(errors_obs))
+					println("rand  Q $error: ", sum_obs_q_error/n)
+					println("rand  R $error: ", sum_obs_r_error/n)
+					#println("\t mean %: ", mean(obs_percents))
+				end
+			end
+
+			if m == "gibbs_n"
+				elbos_gi_100[i] = els[end]
+				if error == "MSE"
+					sum_gi_100_q_error += (Q - q)^2
+					sum_gi_100_r_error += (R - r)^2
+					push!(errors_gi_100, error_metrics(x_true[2:end], μs_s[2:end])[1])
+				else
+					sum_gi_100_q_error += abs(Q - q)
+					sum_gi_100_r_error += abs(R - r)
+					push!(errors_gi_100, error_metrics(x_true[2:end], μs_s[2:end])[2])
+				end
+
+				push!(gi_100_percents, compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds,μs_s))
+
+				if i == n
+					println("\nGibbs n $error: ", mean(errors_gi_100))
+					println("Gibbs n Q $error: ", sum_gi_100_q_error/n)
+					println("Gibbs n R $error: ", sum_gi_100_r_error/n)
+					#println("\t mean %: ", mean(gi_100_percents))
+				end
+
+			end
+
+			if m == "gibbs_conver"
+				elbos_gi_cov[i] = els[end]
+				if error == "MSE"
+					sum_gi_cov_q_error += (Q - q)^2
+					sum_gi_cov_r_error += (R - r)^2
+					push!(errors_gi_cov, error_metrics(x_true[2:end], μs_s[2:end])[1])
+				else
+					sum_gi_cov_q_error += abs(Q - q)
+					sum_gi_cov_r_error += abs(R - r)
+					push!(errors_gi_cov, error_metrics(x_true[2:end], μs_s[2:end])[2])
+				end
+				push!(gi_con_percents, compute_vb_mcmc_inclusion(mcmc_ms, mcmc_stds,μs_s))
+				
+				if i == n
+					println("\nGibbs 2n $error: ", mean(errors_gi_cov))
+					println("Gibbs 2n Q $error: ", sum_gi_cov_q_error/n)
+					println("Gibbs 2n R $error: ", sum_gi_cov_r_error/n)
+					#println("\t mean %: ", mean(gi_con_percents))
+				end
+			end
+		end
+	end
+
+	# println("MLE :", maximum(elbos_mle), "  ", mean(elbos_mle))
+	# println("Random :", maximum(elbos_obs), "  ", mean(elbos_obs))
+	# println("Gibbs 1 (Default) :", maximum(elbos_gi), "  ", mean(elbos_gi))
+	# println("Gibbs 10 :", maximum(elbos_gi_100), "  ", mean(elbos_gi_100))
+	# println("Gibbs 50 :", maximum(elbos_gi_cov), "  ", mean(elbos_gi_cov))
+
+	println("\nELBOs: ")
+	println("MLE :", maximum(elbos_mle))
+	println("Random :", maximum(elbos_obs))
+	println("Gibbs 1 (Default) :", maximum(elbos_gi))
+	println("Gibbs n :", maximum(elbos_gi_100))
+	println("Gibbs 2n :", maximum(elbos_gi_cov))
+end
 
 function test_nile(n=10)
 	y = get_Nile()
@@ -861,40 +1164,41 @@ function test_nile(n=10)
 	return final_elbo, r_chainss, q_chainss, q_rqss
 end
 
-# final_elbo, r_chainss, q_chainss, q_rqss = test_nile(10)
+function nile_comp_optima()
+	final_elbo, r_chainss, q_chainss, q_rqss = test_nile(10)
+	index = argmax(final_elbo)
+	plot_kde = marginalkde(r_chainss[index], q_chainss[index], color=:grey, alpha=0.6)
+	p_MCMC = plot(plot_kde[2])
+	gamma_dist_q = InverseGamma(q_rqss[index].α_q_p, q_rqss[index].β_q_p)
+	println("q(Q) mean: ", mean(gamma_dist_q))
+	ys = range(0, 1500, length=500) 
 
-# index = argmax(final_elbo)
-# plot_kde = marginalkde(r_chainss[index], q_chainss[index], color=:grey, alpha=0.6)
-# p_MCMC = plot(plot_kde[2])
-# gamma_dist_q = InverseGamma(q_rqss[index].α_q_p, q_rqss[index].β_q_p)
-# println("q(Q) mean: ", mean(gamma_dist_q))
-# ys = range(0, 1500, length=500) 
+	gamma_dist_r = InverseGamma(q_rqss[index].α_r_p, q_rqss[index].β_r_p)
+	println("q(R) mean: ", mean(gamma_dist_r))
+	xs = range(10000, 30000, length=500) 
+	plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
+	xlabel!(p_MCMC, "R")
+	ylabel!(p_MCMC, "Q")
+	title!(p_MCMC, "VB in Global Optima")
+	display(p_MCMC)
 
-# gamma_dist_r = InverseGamma(q_rqss[index].α_r_p, q_rqss[index].β_r_p)
-# println("q(R) mean: ", mean(gamma_dist_r))
-# xs = range(10000, 30000, length=500) 
-# plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
-# xlabel!(p_MCMC, "R")
-# ylabel!(p_MCMC, "Q")
-# title!(p_MCMC, "VB in Global Optima")
-# display(p_MCMC)
+	p_MCMC_lop = plot(plot_kde[2])
+	ind_min = argmin(final_elbo)
 
-# p_MCMC_lop = plot(plot_kde[2])
-# ind_min = argmin(final_elbo)
+	gamma_dist_q = InverseGamma(q_rqss[ind_min].α_q_p, q_rqss[ind_min].β_q_p)
+	println("q(Q) local optim mean: ", mean(gamma_dist_q))
+	ys = range(0, 1500, length=500) 
 
-# gamma_dist_q = InverseGamma(q_rqss[ind_min].α_q_p, q_rqss[ind_min].β_q_p)
-# println("q(Q) local optim mean: ", mean(gamma_dist_q))
-# ys = range(0, 1500, length=500) 
+	gamma_dist_r = InverseGamma(q_rqss[ind_min].α_r_p, q_rqss[ind_min].β_r_p)
+	println("q(R) local optim mean: ", mean(gamma_dist_r))
+	xs = range(10000, 30000, length=500) 
 
-# gamma_dist_r = InverseGamma(q_rqss[ind_min].α_r_p, q_rqss[ind_min].β_r_p)
-# println("q(R) local optim mean: ", mean(gamma_dist_r))
-# xs = range(10000, 30000, length=500) 
-
-# plot!(p_MCMC_lop, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
-# xlabel!(p_MCMC_lop, "R")
-# ylabel!(p_MCMC_lop, "Q")
-# title!(p_MCMC_lop, "VB in Local Optima")
-# display(p_MCMC_lop)
+	plot!(p_MCMC_lop, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
+	xlabel!(p_MCMC_lop, "R")
+	ylabel!(p_MCMC_lop, "Q")
+	title!(p_MCMC_lop, "VB in Local Optima")
+	display(p_MCMC_lop)
+end
 
 function nile_kde(sd, init)
 	y = get_Nile()
@@ -966,8 +1270,6 @@ function test_y_pred(n=10)
 	println("vb mean: ", f_s[n], "\nvb_var: ", q_s[n])
 end
 
-#test_y_pred(300)
-
 function timing_exp(T_s, T_e)
 	t_vb = []
 	t_mcmc = []
@@ -997,11 +1299,6 @@ function timing_exp(T_s, T_e)
 	display(p)
 	return p
 end
-
-#p = timing_exp(9000, 63000)
-# scatter!(xs, log.(t_vb), label="vi", color=:orange)
-# plot!(xs, log.(t_vb), label="", lw=1, color=:orange)
-# display(p)
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -1123,12 +1420,7 @@ function plot_latent_level(T_s=1, T_end=30)
 	display(p)
 end
 
-#plot_latent_level(1, 500)
-#plot_latent_level(21, 30)
-
-#main_graph(10, 500, "gibbs")
-
-function test_hyper_update(update=true)
+function graph_hyper_update(update=true)
 	R = 100.0
 	Q = 10.0
 	println("Ground-truth r = $R, q = $Q")
@@ -1136,7 +1428,7 @@ function test_hyper_update(update=true)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
 
 	# ill-conditioned hyper-prior
-	hpp_ll = Priors_ll(0.1, 600, 0.1, 600, 0.0, 1e7)
+	hpp_ll = Priors_ll(0.1, 500, 0.1, 500, 0.0, 1e7)
 
 	println("\n--- VBEM ---")
 	println("\nHyperparam optimisation: $update")
@@ -1159,7 +1451,7 @@ function test_hyper_update(update=true)
 	else
 		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q, out_range_vi=true)
 	end
-	xlims!(plot_q, 6.0, 24.0)
+	xlims!(plot_q, 6.0, 21.0)
 	xlims!(plot_r, 85.0, 115.0)
 	xlabel!(plot_q, "Q")
 	xlabel!(plot_r, "R")
@@ -1186,7 +1478,7 @@ function test_hyper_update(update=true)
 		display(p_MCMC)
 	end
 
-	p = compare_mcmc_vi(mcmc_x_m, μs_s[2:end])
+	p = compare_mcmc_vi(mcmc_x_m[2:end], μs_s[2:end])
 	title!(p, "Latent X means")
 	xlabel!(p, "MCMC (ground-truth)")
 
@@ -1196,8 +1488,47 @@ function test_hyper_update(update=true)
 	display(p)
 end
 
-#test_hyper_update(false)
-#test_hyper_update(true)
+function test_update(update=false)
+	println("---Hyper-param Update:$update---")
+	R = 100.0
+	Q = 10.0
+	Random.seed!(123)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
+	test_gibbs_ll(y, x_true, 10000, 5000, 1)
+
+	for a in [2]
+		for b in [100, 300, 500, 800]
+			hpp_ll = Priors_ll(a, b, a, b, 0.0, 1e7)
+			r, q, els, _ = vb_ll_c(y, hpp_ll, update, 500, 1e-4, init="gibbs_conver")
+			μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
+			μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
+			println("\n$a, $b, VB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
+			println("\t MAD q: ", abs(Q-q))
+			println("\t MAD r: ", abs(R-r))
+			println("\t ELBO", els[end])
+		end
+	end
+end
+
+"""
+Collection of tests, uncomment to run
+"""
+
+# p = timing_exp(9000, 63000)
+# scatter!(xs, log.(t_vb), label="vi", color=:orange)
+# plot!(xs, log.(t_vb), label="", lw=1, color=:orange)
+# display(p)
+
+#main_graph(10, 500, "gibbs")
+#test_update(true)
+#test_update(false)
+#graph_hyper_update(false)
+#graph_hyper_update(true)
+
+#sim_init_tests(50, "MAD")
+
+#mcmc_ms, mcmc_stds, nile_R, nile_Q = get_nile_mcmc()
+#nile_init_tests(mcmc_ms, mcmc_stds, nile_R, nile_Q, "MAD", 50)
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"

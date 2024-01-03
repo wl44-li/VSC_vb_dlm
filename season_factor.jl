@@ -75,8 +75,6 @@ function test_m_static()
     vb_m_static(y, S_C, W_C, prior, C)
 end
 
-#test_m_static()
-
 function vb_e_static(y, A, C, E_R, prior::HPP_D, smooth_out = false)
     P, T = size(y)  # Number of time points
     K = size(A, 1)  # Dimension of the latent state
@@ -144,8 +142,6 @@ function test_e_static()
     println(error_metrics(x, μs))
     plot_latent(x', μs')
 end
-
-#test_e_static()
 
 function vb_ss(ys, A, C, prior::HPP_D, max_iter=500, tol=1e-5, init="random")
 	D, _ = size(ys)
@@ -240,9 +236,6 @@ function test_seasonal_k(y, k, n=10)
     return elss
 end
 
-#_, y = get_airp()
-#p = plot(y, label="air passenger")
-
 function test_air_pass(n=10)
     _, y = get_airp()
     y = diff(y, dims=1)
@@ -274,8 +267,6 @@ function test_air_pass(n=10)
     p = dotplot(groups, all_elbos, group=groups, color=[:blue :orange :green], label="", ylabel="ElBO", legend=false)
     display(p)
 end
-
-#test_air_pass()
 
 function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     elbo_lg = zeros(n)
@@ -380,6 +371,12 @@ function vi_elbo_comp(gen_fun = "S", max_T = 100, n=10)
     #ylims!(p, -800, -200)
     display(p)
 end
+
+"""
+Collection of tests, uncomment to run
+"""
+
+#test_air_pass()
 
 #vi_elbo_comp("S", 100)
 

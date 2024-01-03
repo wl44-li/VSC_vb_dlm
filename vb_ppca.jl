@@ -110,9 +110,6 @@ function v_forward(ys, exp_np::Exp_ϕ, hpp::HPP)
 	return μs, Σs
 end
 
-"""
-Simplified for PPCA, double check with Algorithm 5.1
-"""
 function log_Z(ys, μs, Σs, exp_np::Exp_ϕ, hpp::HPP)
 	D, T = size(ys)
 	log_Z = 0
@@ -214,10 +211,6 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
 
 	if init == "mle"
 		# use MLE esitmate of σ and C to run VBE-step first
-		"""
-		Warning: Work in progress
-		"""
-
 		println("\t--- VB PPCA using MLE initilaization ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
@@ -315,7 +308,7 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
 		hss, log_Z_ = vb_e(ys, exp_np, hpp)
 
 		# Convergence check
-		kl_ρ_ = sum([kl_gamma(hpp.a, hpp.b, qθ.a_s, (qθ.b_s)) for _ in 1:P])
+		kl_ρ_ = sum([kl_gamma(hpp.a, hpp.b, qθ.a_s, qθ.b_s) for _ in 1:P])
 		kl_C_ = sum([kl_C(zeros(K), hpp.γ, (qθ.μ_C)[s], qθ.Σ_C, exp_ρ[s]) for s in 1:P])
 		elbo = log_Z_ - kl_ρ_ - kl_C_
 		el_s[i] = elbo
@@ -344,10 +337,10 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
             break
 		end
 		
-		if (i == max_iter)
-			println("--- Warning: VB has not necessarily converged at $max_iter iterations, 
-			last elbo difference: $(abs(elbo-elbo_prev)), tolerance: $tol ---")
-		end
+		# if (i == max_iter)
+		# 	println("--- Warning: VB has not necessarily converged at $max_iter iterations, 
+		# 	last elbo difference: $(abs(elbo-elbo_prev)), tolerance: $tol ---")
+		# end
 
 		elbo_prev = elbo
 	end
@@ -418,8 +411,6 @@ function comp_ppca(max_T = 1000)
 	p = plot(els, title="ELBO progression", label="")
 	display(p)
 end
-
-#comp_ppca()
 
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
@@ -551,8 +542,6 @@ function test_vb_trivial(T=100)
 	return exp_np, qθ
 end
 
-#exp_np, qθ = test_vb_trivial(5000)
-
 function comp_mcmc_vb(mcmc_mode="hmc")
 	T = 500
     C_d2k1 = reshape([1.0, 0.5], 2, 1)
@@ -579,6 +568,38 @@ function comp_mcmc_vb(mcmc_mode="hmc")
 	@time exp_np, _, _, qθ = vb_ppca_c(y, hpp, false, init="random")
 
 	return mcmc_chain, qθ, exp_np, x_true, y
+end
+
+function graph_mcmc_vb()
+	hmc_chain, _, exp_np, _, y = comp_mcmc_vb()
+	T = 500
+	x_means = Vector{Float64}(undef, T)
+	x_stds = Vector{Float64}(undef, T)
+
+	for t in 1:T
+		samples = hmc_chain[Symbol("x[1,$t]")].data
+		x_means[t] = mean(samples)
+		x_stds[t] = std(samples)
+	end
+
+	K = 1
+	γ = ones(K)
+	a = 2
+	b = 1e-3
+	μ_0 = zeros(K)
+	Σ_0 = Matrix{Float64}(I, K, K)
+	hpp = HPP(γ, a, b, μ_0, Σ_0)
+
+	ωs, Σs = v_forward(y, exp_np, hpp)
+
+	p_mean = compare_mcmc_vi(abs.(x_means), abs.(vec(ωs)))
+	xlabel!(p_mean, "MCMC (ground-truth)")
+	display(p_mean)
+
+	p_std = compare_mcmc_vi(x_stds, vec(sqrt.(Σs)))
+	#xlims!(p_std, 0.65, 0.75)
+	xlabel!(p_std, "MCMC (ground-truth)")
+	display(p_std)
 end
 
 function gen_plots(mode="hmc", ground_truths=nothing)
@@ -637,10 +658,6 @@ function gen_plots(mode="hmc", ground_truths=nothing)
 	display(p2)
 end
 
-#gen_plots("hmc", [1.0, 1.0, 0.5])
-
-#gen_plots("nuts", [2.0, 1.0, 0.5])
-
 function timing_turing(N_s = 600, N_end=2200, n=5)
 	t_mcmc = []
 	C_d2k1 = reshape([1.0, 0.5], 2, 1)
@@ -655,20 +672,6 @@ function timing_turing(N_s = 600, N_end=2200, n=5)
 
 	return log.(t_mcmc)
 end
-
-"""
-200.0: 4.454095941026894
-600.0: 6.246164485354498
-1000.0: 7.478689742708156
-1400.0: 8.147395293793162
-1800.0: 8.583157439848277
-2200.0: 8.877900069585126
-2600.0: 9.090655853105782
-3000.0: 9.388455214042436
-"""
-#ts_mcmc = timing_turing(200, 3000, 8)
-
-t_mcmc = [4.454, 6.246, 7.478, 8.147, 8.583, 8.878, 9.090, 9.388]
 
 function timing_exp_ppca(N_s = 200, N_end=2200, n=8, t_mcmc=nothing)
 	t_vb = []
@@ -712,38 +715,6 @@ function timing_exp_ppca(N_s = 200, N_end=2200, n=8, t_mcmc=nothing)
 	return p
 end
 
-#p_ = timing_exp_ppca(200, 3000, 8, t_mcmc)
-
-# hmc_chain, _, exp_np, x_true, y = comp_mcmc_vb()
-# T = 500
-# x_means = Vector{Float64}(undef, T)
-# x_stds = Vector{Float64}(undef, T)
-
-# for t in 1:T
-# 	samples = hmc_chain[Symbol("x[1,$t]")].data
-# 	x_means[t] = mean(samples)
-# 	x_stds[t] = std(samples)
-# end
-
-# K = 1
-# γ = ones(K)
-# a = 2
-# b = 1e-3
-# μ_0 = zeros(K)
-# Σ_0 = Matrix{Float64}(I, K, K)
-# hpp = HPP(γ, a, b, μ_0, Σ_0)
-
-# ωs, Σs = v_forward(y, exp_np, hpp)
-
-# p_mean = compare_mcmc_vi(abs.(x_means), abs.(vec(ωs)))
-# xlabel!(p_mean, "MCMC (ground-truth)")
-# display(p_mean)
-
-# p_std = compare_mcmc_vi(x_stds, vec(sqrt.(Σs)))
-# #xlims!(p_std, 0.65, 0.75)
-# xlabel!(p_std, "MCMC (ground-truth)")
-# display(p_std)
-
 function main(n)
 	# P = 4, K = 2 truth
 	C_ = [1.0 0.0; 0.5 1.0; 0.3 0.8; 0.9 0.1]
@@ -758,7 +729,24 @@ function main(n)
 	k_elbo_p4(y, 10, false, verboseOut=false)
 end
 
-#main(5000)
+"""
+Collection of tests, uncomment to run
+"""
+
+#comp_ppca()
+
+#main()
+
+#exp_np, qθ = test_vb_trivial(5000)
+#gen_plots("hmc", [1.0, 1.0, 0.5])
+#gen_plots("nuts", [2.0, 1.0, 0.5])
+
+#graph_mcmc_vb()
+
+##ts_mcmc = timing_turing(200, 3000, 8)
+#t_mcmc = [4.454, 6.246, 7.478, 8.147, 8.583, 8.878, 9.090, 9.388]
+#p_ = timing_exp_ppca(200, 3000, 8, t_mcmc)
+
 
 # for MNIST data
 function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
@@ -774,7 +762,7 @@ function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
 	b = 1e-3
 
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I, 2, 2)
+	Σ_0 = Matrix{Float64}(I*1e6, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
 	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)

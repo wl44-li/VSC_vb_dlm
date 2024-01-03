@@ -397,12 +397,6 @@ function test_Gibbs_RQ(rnd, T = 100)
 	println("\nQ Sample ", Q)
 end
 
-# R, Q sample methods tested !
-# test_Gibbs_RQ(123, 100)
-# test_Gibbs_RQ(123, 1000)
-# test_Gibbs_RQ(10, 100)
-# test_Gibbs_RQ(10, 1000)
-
 function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	"""
 	A : State transition (2 X 2)
@@ -440,7 +434,6 @@ function forward_filter(Ys, A, C, R, Q, m_0, C_0)
 	return ms, Cs, a_s, Rs
 end
 
-# On-going FFBS Debug
 function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 	_, T = size(Ys)
     K, _ = size(A)
@@ -460,10 +453,6 @@ function ffbs_x(Ys, A, C, R, Q, m_0, C_0)
 
 	return X
 end
-
-"""
-Check FFBS in Linear Growth [ Compare with DLM with R ]
-"""
 
 function gibbs_lg(y, A, C, prior::HPP_D, mcmc=10000, burn_in=5000, thinning=1; debug=false)
 	P, T = size(y)
@@ -565,20 +554,6 @@ function test_gibbs(y, x_true=nothing, mcmc=10000, burn_in=5000, thin=1; show_pl
 	end
 	return xs_m, xs_std
 end
-
-"""
-Gibbs Debugged, PosDefException for back sample at t=2, simple hack or SVD/Information Filter
-"""
-# A_lg = [1.0 1.0; 0.0 1.0]
-# C_lg = [1.0 0.0]
-# Q = Diagonal([20.0, 5.0])
-# R = [15.0]
-# K = size(A_lg, 1)
-# Random.seed!(123)
-# y, x_true = LinearGrowth.gen_data(A_lg, C_lg, Q, R, zeros(K), Diagonal(ones(K)), 1000)
-# test_mle(y, x_true)
-# test_gibbs(y, x_true, 20000, 10000, 1)
-# test_vb(y, x_true, show_plot=true)
 
 function compare_mcmc_vi(mcmc::Vector{T}, vi::Vector{T}) where T
     # Ensure all vectors have the same length
@@ -713,8 +688,6 @@ function main_graph(n, sd)
 	println("----- END Run seed: $sd -----\n")
 end
 
-#main_graph(1000, 123)
-
 function out_txt(n)
 	file_name = "$(splitext(basename(@__FILE__))[1])_$(Dates.format(now(), "yyyymmdd_HHMMSS")).txt"
 	open(file_name, "w") do f
@@ -725,6 +698,12 @@ function out_txt(n)
 		end
 	end
 end
+
+"""
+Collection of tests, uncomment to run
+"""
+
+#main_graph(1000, 123)
 
 #out_txt(500)
 
