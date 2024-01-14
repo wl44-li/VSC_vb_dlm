@@ -211,7 +211,7 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
 
 	if init == "mle"
 		# use MLE esitmate of σ and C to run VBE-step first
-		println("\t--- VB PPCA using MLE initilaization ---")
+		println("\t--- VB PPCA using MLE init ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 
 		σ²_init = M_mle.σ² .* (1 + randn() * 0.3) 
@@ -273,7 +273,7 @@ function vb_ppca_c(ys, hpp::HPP, hpp_learn=false, max_iter=1000, tol=1e-6; init=
 
 	if init == "random"
 		# init R and C, needs more testing
-		println("\t--- VB PPCA using random initilaization ---")
+		println("\t--- VB PPCA using random init ---")
 		ρ_init = 0.5 / 0.5
 		#ρ_init = hpp.a / hpp.b
 
@@ -752,25 +752,25 @@ Collection of tests, uncomment to run
 function vb_ppca_k2(y, em_iter=100, hp_optim=false; debug=false, mode="mle")
 	
 	# related to row-precision of C/W
-	γ = ones(2) 
+	γ = ones(2) * 1e-3
 
 	# related to precision of σ²
 	# a = 1.1
 	# b = 0.05
 
 	a = 2
-	b = 1e-3
+	b = 0.001
 
 	μ_0 = zeros(2)
-	Σ_0 = Matrix{Float64}(I*1e6, 2, 2)
+	Σ_0 = Matrix{Float64}(I*1e5, 2, 2)
 	hpp = HPP(γ, a, b, μ_0, Σ_0)
 
-	@time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)
+	# @time exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)
+	exp_np, _, els = vb_ppca_c(y, hpp, hp_optim, em_iter, init=mode)
 
 	xs, xs_var = v_forward(y, exp_np, hpp)
 
 	if debug
-		#println("ELBOs: ", els)
 		println("ELBOs end: ", els[end])
 		p_el = plot(els, label="ElBO")
 		display(p_el)

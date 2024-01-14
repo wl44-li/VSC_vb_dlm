@@ -274,7 +274,7 @@ function vb_e_b(ys::Matrix{Float64}, exp_np::Exp_ϕ_B, hpp::HPP_B, smooth_out=fa
 	return HSS(W_C, W_A, S_C, S_A), ω_0, Υ_0, log_Z_
 end
 
-function vb_dlm_c(ys::Matrix{Float64}, hpp::HPP_B, hpp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=true)
+function vb_dlm_c(ys::Matrix{Float64}, hpp::HPP_B, hpp_learn=false, max_iter=500, tol=1e-4; init="mle", debug=false)
 	D, _ = size(ys)
 	K = length(hpp.α)
 
@@ -284,7 +284,7 @@ function vb_dlm_c(ys::Matrix{Float64}, hpp::HPP_B, hpp_learn=false, max_iter=500
 	el_s = zeros(max_iter)
 
     if init == "mle"	
-		println("\t--- VB using MLE initilaization ---")
+		println("\t--- VB using MLE init ---")
 		M_mle = MultivariateStats.fit(PPCA, ys; maxoutdim=K)
 		σ²_init = M_mle.σ² .* (1 + randn() * 0.2) 
 		e_C = M_mle.W[:, 1:K] * (1 + randn() * 0.2)
@@ -449,7 +449,7 @@ function test_pattern(train_y, train_labels, length=100, mode="pca")
         a = 2
         b = 0.001
         μ_0 = zeros(K)
-        Σ_0 = Matrix{Float64}(I*1e6, K, K)
+        Σ_0 = Matrix{Float64}(I*1e5, K, K)
         hpp = HPP_B(α, γ, a, b, μ_0, Σ_0)
         exp_np, els = vb_dlm_c(y_pattern, hpp, false, 1)
         ωs, Υs = vb_e_b(y_pattern, exp_np, hpp, true)
@@ -580,10 +580,9 @@ end
 function gen_vb_pattern(train_y, train_labels)
 	_, xs, xs_stds = test_pattern(train_y, train_labels, 1000, "b")
 
-	println("1 ", xs_stds[:, 1])
-	println("End ", xs_stds[:, end])
-	println("100 ", xs_stds[:, 100])
-
+	# println("1 ", xs_stds[:, 1])
+	# println("End ", xs_stds[:, end])
+	# println("100 ", xs_stds[:, 100])
 	xs = abs.(xs[:, 91:110])
 	xs_stds = xs_stds[:, 91:110]
 	observation_indices = 1:20 
@@ -619,7 +618,6 @@ function gen_vb_pattern(train_y, train_labels)
 	ms = 3, color = :black, label="0")
 	display(p)
 	println("VB Complete")
-
 end
 
 function gen_MNIST_O_similar(train_y, train_labels)
@@ -639,14 +637,42 @@ function gen_MNIST_O_similar(train_y, train_labels)
 
 end
 
+function time_series_ppca_var()
+	_, _, xs_stds = test_pattern(train_y, train_labels, 500, "b")
+
+	p = plot(xs_stds[1, :], title="Time series PPCA", label="", ylabel="σ", xlabel="T")
+	#ylims!(p, 0.05, 0.08)
+	display(p)
+
+	p_2 = plot(xs_stds[2, :], title="Time series PPCA", label="", ylabel="σ", xlabel="T")
+	#ylims!(p_2, 0.05, 0.12)
+	display(p_2)
+end
+
+function ppca_var()
+	_, xs_stds = test_pattern(train_y, train_labels, 500, "ppca")
+
+	p = plot(ones(500) .* xs_stds[1], title="PPCA", label="", ylabel="σ", xlabel="T")
+	ylims!(p, 0.0, 0.08)
+	display(p)
+
+	p_2 = plot(ones(500) .* xs_stds[2], title="PPCA", label="", ylabel="σ", xlabel="T")
+	ylims!(p_2, 0.0, 0.12)
+	display(p_2)
+
+end
+
 """
 Collection of tests, uncomment to run
 """
 #test_MNIST(100, true)
 #test_MNIST(100, true, "vbem")
 
-#train_y, train_labels = MNIST(split=:train)[:]
-#train_y, train_labels = train_y[:, :, 1:12000], train_labels[1:12000]
+train_y, train_labels = MNIST(split=:train)[:]
+train_y, train_labels = train_y[:, :, 1:12000], train_labels[1:12000]
+
+time_series_ppca_var()
+ppca_var()
 
 #gen_pca_pattern(train_y, train_labels)
 

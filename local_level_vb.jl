@@ -540,7 +540,7 @@ function vb_ll_c(y::Vector{Float64}, hpp::Priors_ll, hp_learn=false, max_iter=10
 		end
 		
 		if (hp_learn)
-			if (i%10 == 0) 
+			if (i%5 == 0) 
 				a_r, b_r, a_q, b_q = update_ab(hpp, qθ)
 				hpp = Priors_ll(a_r, b_r, a_q, b_q, μs_0, σs_s0)
 				#hpp = Priors_ll(a_r, b_r, a_q, b_q, hpp.μ_0, hpp.σ_0)
@@ -672,7 +672,7 @@ function test_vb_ll(y, x_true=nothing, hyperoptim=false; show_plot=false)
 		p_stds = plot(x_std, label = "", title="VI x std")
 		display(p_stds)
 		
-		p = plot(els, label = "ElBO", title = "ElBO Progression, Hyperparam optim: $hyperoptim")
+		p = plot(els, label = "ELBO", title = "ELBO Progression, Hyperparam optim: $hyperoptim")
 		display(p)
 	end
 
@@ -747,10 +747,17 @@ function test_Nile_level()
 	
 	T = 1871:1970
 	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
-	#display(p)
+	xlabel!("Time")
+	ylabel!("Level")
 
+	# p_nile = plot(T, y, label="", xlabel="Time", ylabel="Nile")
+	# display(p_nile)
 	return p
 end
+
+Random.seed!(123)
+p = test_Nile_level()
+display(p)
 
 function get_nile_mcmc()
 	y = Float64.(vec(get_Nile()))
@@ -1341,15 +1348,15 @@ end
 function main_graph(sd, max_T=100, sampler="gibbs")
 	println("Running experiments for local level model (with graphs):\n")
 	println("T = $max_T")
-	R = 100.0
-	Q = 10.0
+	R = 20.0
+	Q = 100.0
 	println("Ground-truth r = $R, q = $Q")
 	Random.seed!(sd)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, max_T)
 
 	test_MLE(y, x_true)
-	vb_x_m, vb_x_std, q_rq, els, avg_log_score = test_vb_ll(y, x_true)
-	println("VBEM avg log liklihood : ", avg_log_score)
+	_, _, q_rq, els, _ = test_vb_ll(y, x_true)
+	# println("VBEM avg log liklihood : ", avg_log_score)
 	p_els = plot(els, label="ElBO")
 	display(p_els)
 
@@ -1369,7 +1376,7 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	end
 
 	plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q)
-	xlims!(plot_q, 2.0, 20.0)
+	# xlims!(plot_q, 2.0, 20.0)
 	xlabel!(plot_q, "Q")
 	xlabel!(plot_r, "R")
 	display(plot_r)
@@ -1385,27 +1392,28 @@ function main_graph(sd, max_T=100, sampler="gibbs")
 	plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
 	display(p_MCMC)
 
-	p = compare_mcmc_vi(mcmc_x_m[2:end], vb_x_m[2:end])
-	title!(p, "Latent X means")
-	xlabel!(p, "MCMC (ground-truth)")
-	display(p)
+	# p = compare_mcmc_vi(mcmc_x_m[2:end], vb_x_m[2:end])
+	# title!(p, "Latent X means")
+	# xlabel!(p, "MCMC (ground-truth)")
+	# display(p)
 
-	p2 = compare_mcmc_vi(mcmc_x_std[2:end], vb_x_std[2:end])
-	title!(p2, "Latent X stds")
-	xlabel!(p2, "MCMC (ground-truth)")
-	display(p2)
+	# p2 = compare_mcmc_vi(mcmc_x_std[2:end], vb_x_std[2:end])
+	# title!(p2, "Latent X stds")
+	# xlabel!(p2, "MCMC (ground-truth)")
+	# display(p2)
 end
 
 function plot_latent_level(T_s=1, T_end=30)
-	R = 100.0
-	Q = 10.0
+	R = 20.0
+	Q = 100.0
 	println("Ground-truth r = $R, q = $Q")
-	Random.seed!(111)
-	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 500)
+	Random.seed!(39)
+	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 1000)
 	vb_x_m, vb_x_std, _, _, _ = test_vb_ll(y, x_true)
 	mcmc_x_m, mcmc_x_std, _, _ = test_gibbs_ll(y, x_true, 10000, 5000, 1)
 
 	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], x_true, T_s, T_end)
+	xlabel!(p, "T")
 	ylabel!(p, "Level")
 	display(p)
 
@@ -1420,11 +1428,13 @@ function plot_latent_level(T_s=1, T_end=30)
 	display(p)
 end
 
+# plot_latent_level(51, 100)
+
 function graph_hyper_update(update=true)
-	R = 100.0
-	Q = 10.0
+	R = 20.0
+	Q = 100.0
 	println("Ground-truth r = $R, q = $Q")
-	Random.seed!(123)
+	Random.seed!(39)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
 
 	# ill-conditioned hyper-prior
@@ -1437,7 +1447,7 @@ function graph_hyper_update(update=true)
 	μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	println("\nVB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
 	
-	println("final elbo : ", els[end])
+	# println("final elbo : ", els[end])
 	# p_els = plot(els, label="elbo")
 	# display(p_els)
 
@@ -1451,8 +1461,8 @@ function graph_hyper_update(update=true)
 	else
 		plot_r, plot_q = plot_rq_CI(q_rq.α_r_p, q_rq.β_r_p, rs, R), plot_rq_CI(q_rq.α_q_p, q_rq.β_q_p, qs, Q, out_range_vi=true)
 	end
-	xlims!(plot_q, 6.0, 21.0)
-	xlims!(plot_r, 85.0, 115.0)
+	# xlims!(plot_q, 6.0, 21.0)
+	# xlims!(plot_r, 85.0, 115.0)
 	xlabel!(plot_q, "Q")
 	xlabel!(plot_r, "R")
 	display(plot_r)
@@ -1464,48 +1474,50 @@ function graph_hyper_update(update=true)
 		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
 		ys = range(extrema(qs)..., length=200) 
 		plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
-		xlims!(p_MCMC, 85.0, 108.0)
-		ylims!(p_MCMC, 6.0, 19.0)
+		# xlims!(p_MCMC, 85.0, 108.0)
+		# ylims!(p_MCMC, 6.0, 19.0)
 		display(p_MCMC)
 	else
 		gamma_dist_r = InverseGamma(q_rq.α_r_p, q_rq.β_r_p)
-		xs = range(80.0, 110.0, length=200) 
+		xs = range(10.0, 30.0, length=200) 
 		gamma_dist_q = InverseGamma(q_rq.α_q_p, q_rq.β_q_p)
-		ys = range(0.0, 30.0, length=200) 
+		ys = range(80.0, 120.0, length=200) 
 		plot!(p_MCMC, xs, ys, (x, y) -> pdf(gamma_dist_q, y) * pdf(gamma_dist_r, x), st=:contour)
-		xlims!(p_MCMC, 85.0, 108.0)
-		ylims!(p_MCMC, 6.0, 19.0)
+		# xlims!(p_MCMC, 85.0, 108.0)
+		# ylims!(p_MCMC, 6.0, 19.0)
 		display(p_MCMC)
 	end
 
-	p = compare_mcmc_vi(mcmc_x_m[2:end], μs_s[2:end])
-	title!(p, "Latent X means")
-	xlabel!(p, "MCMC (ground-truth)")
+	# p = compare_mcmc_vi(mcmc_x_m[2:end], μs_s[2:end])
+	# title!(p, "Latent X means")
+	# xlabel!(p, "MCMC (ground-truth)")
 
-	#better view on the difference
-	xlims!(p, 0.0, 50.0)
-	ylims!(p, 0.0, 50.0)
-	display(p)
+	# #better view on the difference
+	# xlims!(p, 0.0, 50.0)
+	# ylims!(p, 0.0, 50.0)
+	# display(p)
 end
 
 function test_update(update=false)
 	println("---Hyper-param Update:$update---")
-	R = 100.0
-	Q = 10.0
-	Random.seed!(123)
+	R = 20.0
+	Q = 100.0
+	Random.seed!(39)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
 	test_gibbs_ll(y, x_true, 10000, 5000, 1)
 
 	for a in [2]
-		for b in [100, 300, 500, 800]
+		for b in [600]
 			hpp_ll = Priors_ll(a, b, a, b, 0.0, 1e7)
-			r, q, els, _ = vb_ll_c(y, hpp_ll, update, 500, 1e-4, init="gibbs_conver")
+			r, q, els, _ = vb_ll_c(y, hpp_ll, update, 500, 1e-5, init="gibbs")
 			μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
 			μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 			println("\n$a, $b, VB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
 			println("\t MAD q: ", abs(Q-q))
 			println("\t MAD r: ", abs(R-r))
-			println("\t ELBO", els[end])
+			println("\t ELBO: ", els[end])
+			p = plot(els, label="ELBO")
+			display(p)
 		end
 	end
 end
@@ -1519,9 +1531,11 @@ Collection of tests, uncomment to run
 # plot!(xs, log.(t_vb), label="", lw=1, color=:orange)
 # display(p)
 
-#main_graph(10, 500, "gibbs")
-#test_update(true)
-#test_update(false)
+# main_graph(39, 1000, "gibbs")
+
+# test_update(true)
+# test_update(false)
+
 #graph_hyper_update(false)
 #graph_hyper_update(true)
 
