@@ -733,7 +733,7 @@ function test_Nile_level()
 	vb_x_m, σs_s, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 	vb_x_std = sqrt.(σs_s)
 
-	p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], nothing, 1, 100, nile_test=true)
+	#p = plot_CI_ll(vb_x_m[2:end], vb_x_std[2:end], nothing, 1, 100, nile_test=true)
 	#display(p)
 
 	mcmc_xs, _, _ = gibbs_ll(y, 1.0, 1.0, 3000, 0, 1)
@@ -746,18 +746,19 @@ function test_Nile_level()
 	upper_bound = μ_s + 1.96 .* stds
 	
 	T = 1871:1970
-	plot!(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
+	p = plot(T, μ_s, ribbon=(μ_s-lower_bound, upper_bound-μ_s), fillalpha=0.1, lw=1, ls=:dash, color=:blue, label="MCMC level with 95% CI")
+	plot!(T, y, label="data", color=:black)
 	xlabel!("Time")
 	ylabel!("Level")
 
-	# p_nile = plot(T, y, label="", xlabel="Time", ylabel="Nile")
-	# display(p_nile)
+	p_nile = plot(T, y, label="", xlabel="Time", ylabel="Nile", color=:black)
+	display(p_nile)
 	return p
 end
 
-Random.seed!(123)
-p = test_Nile_level()
-display(p)
+# Random.seed!(123)
+# p = test_Nile_level()
+# display(p)
 
 function get_nile_mcmc()
 	y = Float64.(vec(get_Nile()))
@@ -1504,20 +1505,25 @@ function test_update(update=false)
 	Q = 100.0
 	Random.seed!(39)
 	y, x_true = LocalLevel.gen_data(1.0, 1.0, Q, R, 0.0, 1.0, 2000)
-	test_gibbs_ll(y, x_true, 10000, 5000, 1)
+	#test_gibbs_ll(y, x_true, 10000, 5000, 1)
 
 	for a in [2]
-		for b in [600]
+		for b in [500]
 			hpp_ll = Priors_ll(a, b, a, b, 0.0, 1e7)
 			r, q, els, _ = vb_ll_c(y, hpp_ll, update, 500, 1e-5, init="gibbs")
 			μs_f, σs_f, a_s, rs, _ = forward_ll(y, 1.0, 1.0, 1/r, 1/q, hpp_ll)
-			μs_s, _, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
+			μs_s, σ_ss, _ = backward_ll(1.0, μs_f, σs_f, a_s, rs, 1/q)
 			println("\n$a, $b, VB latent x error (MSE, MAD) : " , error_metrics(x_true[2:end], μs_s[2:end]))
 			println("\t MAD q: ", abs(Q-q))
 			println("\t MAD r: ", abs(R-r))
 			println("\t ELBO: ", els[end])
+			σ_ss = sqrt.(σ_ss)
+			println("\t Iterations: ", length(els))
 			p = plot(els, label="ELBO")
 			display(p)
+			p_x = plot_CI_ll(μs_s[2:end], σ_ss[2:end], x_true, 1, 50)
+			#display(p_x)
+			return p_x
 		end
 	end
 end
@@ -1533,8 +1539,16 @@ Collection of tests, uncomment to run
 
 # main_graph(39, 1000, "gibbs")
 
-# test_update(true)
-# test_update(false)
+# p_hy = test_update(true)
+# title!(p_hy, "With Hyper-parameter Update")
+# xlabel!(p_hy, "T")
+# ylabel!(p_hy, "Level")
+# display(p_hy)
+# p_nhy = test_update(false)
+# title!(p_nhy, "Without Hyper-parameter Update")
+# xlabel!(p_nhy, "T")
+# ylabel!(p_nhy, "Level")
+# display(p_nhy)
 
 #graph_hyper_update(false)
 #graph_hyper_update(true)
